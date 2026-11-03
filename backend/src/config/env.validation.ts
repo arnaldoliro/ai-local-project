@@ -58,6 +58,49 @@ export class EnvironmentVariables {
   @IsInt()
   @Min(512)
   LLM_CONTEXT_WINDOW: number;
+
+  /** Tokens reserved for the answer (sent to Ollama as num_predict). */
+  @Transform(({ value }) => Number(value))
+  @IsInt()
+  @Min(64)
+  LLM_MAX_OUTPUT_TOKENS: number;
+
+  /**
+   * Answer reserve when thinking is on: reasoning tokens count as output.
+   * The window stays the same, so those requests carry less history.
+   */
+  @Transform(({ value }) => Number(value))
+  @IsInt()
+  @Min(64)
+  LLM_MAX_OUTPUT_TOKENS_THINKING: number;
+
+  /**
+   * How long to wait for the first streamed chunk. Generous on purpose:
+   * a cold model load takes ~65 s on this machine.
+   */
+  @Transform(({ value }) => Number(value))
+  @IsInt()
+  @Min(1000)
+  LLM_FIRST_TOKEN_TIMEOUT_MS: number;
+
+  /** Hard limit for a whole model call, counted from when it leaves the queue. */
+  @Transform(({ value }) => Number(value))
+  @IsInt()
+  @Min(1000)
+  LLM_TOTAL_TIMEOUT_MS: number;
+
+  /** Max model calls waiting in the backend queue (the running one excluded). */
+  @Transform(({ value }) => Number(value))
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  LLM_QUEUE_MAX_SIZE: number;
+
+  /** Upper bound of history messages considered, before the token budget. */
+  @Transform(({ value }) => Number(value))
+  @IsInt()
+  @Min(0)
+  CONTEXT_MAX_HISTORY_MESSAGES: number;
 }
 
 export function validateEnv(
