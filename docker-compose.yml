@@ -1,0 +1,120 @@
+# AI Local — development stack.
+#
+# Security: every published port is bound to 127.0.0.1 (never 0.0.0.0), so
+# nothing is reachable from the network. Postgres publishes no port at all.
+#
+# Machine protection (16 GB RAM / 4 GB VRAM shared with the desktop):
+# resource limits on every service, and Ollama serving one request and one
+# model at a time.
+
+name: ai-local
+
+services:
+  ollama:
+    image: ollama/ollama:0.40.14
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11434:11434"
+    environment:
+      OLLAMA_NUM_PARALLEL: "1"        # one generation at a time
+      OLLAMA_MAX_LOADED_MODELS: "1"   # never two models in VRAM
+      OLLAMA_MAX_QUEUE: "10"          # reject instead of piling up work
+      # Context window, fixed server-side (the OpenAI-compatible API cannot set
+      # num_ctx per request). Same value the backend uses for its token budget.
+      OLLAMA_CONTEXT_LENGTH: ${LLM_CONTEXT_WINDOW:?set LLM_CONTEXT_WINDOW in .env}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
+    volumes:
+      - ollama:/root/.ollama
+    deploy:
+      resources:
+        limits:
+          cpus: "6"       # of 16 threads, keeps the desktop responsive
+          memory: 6g
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]   # talks to the server, loads no model
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    # No `ports:` on purpose: only reachable inside the compose network.
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    environment:
+      PORT: "3001"
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      CORS_ORIGINS: http://127.0.0.1:3000,http://localhost:3000
+      OLLAMA_API_URL: http://ollama:11434
+      LLM_BASE_URL: http://ollama:11434/v1
+      LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:?set LLM_DEFAULT_MODEL in .env}
+      LLM_CONTEXT_WINDOW: ${LLM_CONTEXT_WINDOW}
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules   # keep the container's node_modules, not the host's
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 768m
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      # Read by the browser, so it must be the host address, not `backend`.
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:3001
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1536m
+
+volumes:
+  # Created before this project, already holds the downloaded models.
+  ollama:
+    external: true
+  pgdata:

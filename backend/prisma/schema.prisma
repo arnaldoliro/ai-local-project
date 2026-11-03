@@ -1,0 +1,51 @@
+// Prisma 7: the connection URL lives in prisma.config.ts, not here.
+// Module format and import extensions are inferred from tsconfig.json (ESM).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MessageRole {
+  system
+  user
+  assistant
+}
+
+enum MessageStatus {
+  streaming
+  complete
+  error
+  aborted
+}
+
+model Conversation {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  title     String?
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  messages  Message[]
+
+  @@map("conversations")
+}
+
+model Message {
+  id             String        @id @default(uuid(7)) @db.Uuid
+  conversationId String        @map("conversation_id") @db.Uuid
+  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           MessageRole
+  content        String
+  /// Model reasoning when thinking is enabled. Stored, but never sent back as context.
+  thinking       String?
+  /// Real token count reported by the model (usage), used to calibrate the estimator.
+  tokenCount     Int?          @map("token_count")
+  status         MessageStatus @default(complete)
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}

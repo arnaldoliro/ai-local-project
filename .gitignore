@@ -1,0 +1,18 @@
+CLAUDE.md
+# Secrets
+.env
+
+# Dependencies and build output
+node_modules/
+dist/
+.next/
+coverage/
+*.tsbuildinfo
+
+# Generated Prisma client
+backend/src/generated/
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/

@@ -1,0 +1,22 @@
+# Development image: dependencies are baked in, source code is bind-mounted
+# by docker-compose.yml so `nest start --watch` reloads on every save.
+FROM node:24-bookworm-slim
+
+# Prisma's schema engine (migrations) needs OpenSSL.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+RUN chown node:node /app
+USER node
+
+COPY --chown=node:node package.json package-lock.json ./
+RUN npm ci
+
+COPY --chown=node:node . .
+
+EXPOSE 3001
+
+# Apply pending migrations, regenerate the client, then start in watch mode.
+CMD ["sh", "-c", "npx prisma migrate deploy && npx prisma generate && npm run start:dev"]
