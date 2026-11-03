@@ -83,6 +83,29 @@ docker compose up -d --build -V backend
 docker compose exec backend npx prisma migrate dev --name descricao_da_mudanca
 ```
 
+## API
+
+| Método | Rota | O que faz |
+|---|---|---|
+| `GET` | `/health` | Status do banco e do Ollama (não carrega modelo) |
+| `POST` | `/conversations` | Cria uma conversa |
+| `GET` | `/conversations/current` | Conversa mais recente com as mensagens |
+| `POST` | `/conversations/:id/messages` | Envia `{ content, think? }` e responde em **SSE** |
+
+Eventos do stream, em ordem: `start` → `queued` (se houver fila) → `generating` (`modelLoaded: false` = carregando o modelo) → `thinking`* / `content`* → `done` ou `error`. Fechar a conexão cancela a geração no Ollama.
+
+## Como o contexto é montado
+
+A janela tem 4096 tokens: 1024 ficam reservados para a resposta e 10% são margem de erro. Sobram 2.662 tokens para o prompt, preenchidos nesta ordem:
+
+1. System prompt
+2. Mensagem atual (se não couber sozinha, a API responde `413`)
+3. Mensagens anteriores, da mais nova para a mais antiga, até acabar o orçamento (no máximo 20)
+
+Com o **raciocínio ligado**, a reserva de resposta sobe para 2048 tokens, porque o raciocínio também conta como saída. Nessa mensagem sobram cerca de 1.638 tokens para o prompt. A janela continua em 4096.
+
+Os tokens são estimados antes do envio (cerca de 3 caracteres por token, de propósito pessimista). O log do backend mostra a estimativa ao lado do número real devolvido pelo Ollama, para calibrar a heurística.
+
 ## Proteções da máquina
 
 | Onde | O quê |
@@ -91,7 +114,7 @@ docker compose exec backend npx prisma migrate dev --name descricao_da_mudanca
 | Contexto | `OLLAMA_CONTEXT_LENGTH` fixo (4096) a partir do `.env` |
 | Postgres | 512 MB de RAM, 1 CPU |
 | Backend / Frontend | 768 MB / 1,5 GB de RAM, 2 CPUs cada |
-| Backend (Fase 1) | Fila com uma chamada ao modelo por vez e timeouts |
+| Backend | Fila com uma chamada ao modelo por vez (prioridade para o chat, até 10 na espera), timeout de primeiro token e total, e cancelamento ao fechar a conexão |
 
 ## Segurança
 
@@ -102,7 +125,7 @@ docker compose exec backend npx prisma migrate dev --name descricao_da_mudanca
 ## Roadmap
 
 - [x] **Fase 0:** fundação (compose, esqueletos, config validada, Prisma + pgvector)
-- [ ] **Fase 1:** chat com streaming, fila do modelo, gestão de contexto
+- [x] **Fase 1:** chat com streaming, fila do modelo, gestão de contexto
 - [ ] **Fase 2:** várias conversas, título automático, resumo das antigas
 - [ ] **Fase 3:** modelo, system prompt e temperatura por conversa
 - [ ] **Fase 4:** imagens
