@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { EnvironmentVariables } from '../config/env.validation.js';
+import { EmbeddingClient } from './embedding-client.js';
 import { LlmClient } from './llm-client.js';
 import { LlmError, type LlmErrorCode } from './llm.errors.js';
 import { LlmQueue } from './llm-queue.js';
@@ -30,6 +31,13 @@ export interface ChatCallOptions {
  * generating, which frees the GPU immediately.
  */
 const MODELS_CACHE_MS = 10_000;
+/** An embedding takes ~0.3 s on CPU (~1.7 s with a cold load): generous. */
+const EMBED_TIMEOUT_MS = 60_000;
+
+export interface EmbedCallOptions {
+  priority: LlmPriority;
+  signal?: AbortSignal;
+}
 
 @Injectable()
 export class LlmService implements OnModuleDestroy {
@@ -43,8 +51,32 @@ export class LlmService implements OnModuleDestroy {
   constructor(
     private readonly client: LlmClient,
     private readonly env: EnvironmentVariables,
+    private readonly embedder: EmbeddingClient,
   ) {
     this.queue = new LlmQueue(env.LLM_QUEUE_MAX_SIZE);
+  }
+
+  /** Nothing running and nothing waiting: safe moment for backfill work. */
+  isIdle(): boolean {
+    return !this.queue.isBusy && this.queue.pendingCount === 0;
+  }
+
+  /** Whether the embedding server is up with the configured model. */
+  hasEmbeddingModel(): Promise<boolean> {
+    return this.embedder.hasModel(this.env.EMBEDDING_MODEL);
+  }
+
+  /**
+   * Embeddings go through the SAME queue as chat: even though they run on
+   * another (CPU) server, the rule is one model call at a time, period.
+   * Batches are the caller's loop, one call after another.
+   */
+  embed(texts: string[], options: EmbedCallOptions): Promise<number[][]> {
+    this.preemptBackgroundFor(options.priority);
+    return this.queue.run(() => this.executeEmbed(texts, options), {
+      priority: options.priority,
+      signal: options.signal,
+    });
   }
 
   /**
@@ -74,17 +106,7 @@ export class LlmService implements OnModuleDestroy {
   }
 
   chat(request: ChatRequest, options: ChatCallOptions): Promise<ChatResult> {
-    // A user waiting for an answer beats a title or a summary: interrupt the
-    // background call instead of queueing behind it. It is retried after the
-    // next exchange, so nothing is lost.
-    if (
-      options.priority === LlmPriority.Chat &&
-      this.running &&
-      this.running.priority !== LlmPriority.Chat
-    ) {
-      this.running.preempt();
-    }
-
+    this.preemptBackgroundFor(options.priority);
     return this.queue.run(() => this.execute(request, options), {
       priority: options.priority,
       signal: options.signal,
@@ -105,6 +127,50 @@ export class LlmService implements OnModuleDestroy {
       },
     });
     return { content, result };
+  }
+
+  /**
+   * A user waiting for an answer beats a title or a summary: interrupt the
+   * background generation instead of queueing behind it. It is re-queued,
+   * so nothing is lost.
+   */
+  private preemptBackgroundFor(priority: LlmPriority): void {
+    if (
+      priority === LlmPriority.Chat &&
+      this.running &&
+      this.running.priority !== LlmPriority.Chat
+    ) {
+      this.running.preempt();
+    }
+  }
+
+  private async executeEmbed(
+    texts: string[],
+    options: EmbedCallOptions,
+  ): Promise<number[][]> {
+    const signals = [
+      AbortSignal.timeout(EMBED_TIMEOUT_MS),
+      this.shutdown.signal,
+    ];
+    if (options.signal) signals.push(options.signal);
+    const signal = AbortSignal.any(signals);
+    try {
+      return await this.embedder.embed(this.env.EMBEDDING_MODEL, texts, signal);
+    } catch (error) {
+      if (signal.aborted) {
+        const reason: unknown = signal.reason;
+        if (reason instanceof LlmError) throw reason;
+        const timedOut =
+          reason instanceof DOMException && reason.name === 'TimeoutError';
+        throw new LlmError(
+          timedOut ? 'timeout_total' : 'aborted',
+          timedOut ? 'Embedding timed out' : 'Embedding cancelled',
+        );
+      }
+      throw error instanceof LlmError
+        ? error
+        : new LlmError('unavailable', (error as Error).message);
+    }
   }
 
   onModuleDestroy(): void {

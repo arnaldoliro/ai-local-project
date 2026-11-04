@@ -3,6 +3,7 @@ import {
   type AttachmentDto,
 } from '../attachments/attachment.dto.js';
 import { estimateImageTokens } from '../context/token-estimator.js';
+import type { MemoryRef } from '../memory/memory.prompt.js';
 import type {
   Attachment,
   Conversation,
@@ -18,6 +19,8 @@ export interface MessageDto {
   status: Message['status'];
   createdAt: string;
   attachments: AttachmentDto[];
+  /** Memories injected to produce this answer (assistant messages only). */
+  memories: MemoryRef[];
 }
 
 export interface ConversationDto {
@@ -27,6 +30,7 @@ export interface ConversationDto {
   model: string | null;
   systemPrompt: string | null;
   temperature: number | null;
+  memoryEnabled: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -47,6 +51,9 @@ export const toMessageDto = (
   attachments: (m.attachments ?? []).map((a) =>
     toAttachmentDto(a, estimateImageTokens(a.width, a.height)),
   ),
+  memories: Array.isArray(m.memories)
+    ? (m.memories as unknown as MemoryRef[])
+    : [],
 });
 
 export const toConversationDto = (c: Conversation): ConversationDto => ({
@@ -55,6 +62,7 @@ export const toConversationDto = (c: Conversation): ConversationDto => ({
   model: c.model,
   systemPrompt: c.systemPrompt,
   temperature: c.temperature,
+  memoryEnabled: c.memoryEnabled,
   createdAt: c.createdAt.toISOString(),
   updatedAt: c.updatedAt.toISOString(),
 });

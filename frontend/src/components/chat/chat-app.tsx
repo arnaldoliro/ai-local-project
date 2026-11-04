@@ -21,7 +21,12 @@ type Props = {
   onCreated: (conversation: Conversation) => void;
 };
 
-const NO_SETTINGS: ConversationSettings = { model: null, systemPrompt: null, temperature: null };
+const NO_SETTINGS: ConversationSettings = {
+  model: null,
+  systemPrompt: null,
+  temperature: null,
+  memoryEnabled: true,
+};
 
 export function ChatApp({ conversationId, onCreated }: Props) {
   const chat = useChat(conversationId, onCreated);
@@ -39,7 +44,12 @@ export function ChatApp({ conversationId, onCreated }: Props) {
   const conversation = conversations.find((c) => c.id === chat.conversationId);
   const title = conversation?.title ?? null;
   const settings: ConversationSettings = conversation
-    ? { model: conversation.model, systemPrompt: conversation.systemPrompt, temperature: conversation.temperature }
+    ? {
+        model: conversation.model,
+        systemPrompt: conversation.systemPrompt,
+        temperature: conversation.temperature,
+        memoryEnabled: conversation.memoryEnabled,
+      }
     : pendingSettings;
   const model = settings.model ?? defaults?.model ?? null;
   // Unknown (list not loaded yet) counts as supported; the backend decides.

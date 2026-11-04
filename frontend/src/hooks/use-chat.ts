@@ -118,7 +118,16 @@ export function useChat(initialConversationId: string | null, onCreated: (conver
       setPhase({ kind: "sending" });
       setMessages((list) => [
         ...list,
-        { id: tempUserId, role: "user", content, thinking: null, status: "complete", createdAt, attachments },
+        {
+          id: tempUserId,
+          role: "user",
+          content,
+          thinking: null,
+          status: "complete",
+          createdAt,
+          attachments,
+          memories: [],
+        },
         {
           id: tempAssistantId,
           role: "assistant",
@@ -127,6 +136,7 @@ export function useChat(initialConversationId: string | null, onCreated: (conver
           status: "streaming",
           createdAt,
           attachments: [],
+          memories: [],
         },
       ]);
 

@@ -21,7 +21,8 @@ Navegador ──▶ frontend (Next.js) 127.0.0.1:3000
    │
    └──── HTTP / SSE ──▶ backend (NestJS) 127.0.0.1:3001
                            ├──▶ postgres + pgvector   (sem porta publicada)
-                           └──▶ ollama (GPU)          127.0.0.1:11434
+                           ├──▶ ollama (GPU)          127.0.0.1:11434   chat
+                           └──▶ ollama-embed (CPU)    (sem porta)       embeddings
 ```
 
 O navegador fala direto com a API, e o CORS só aceita a origem do frontend.
@@ -48,10 +49,11 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Se o modelo ainda não estiver no volume:
+Se os modelos ainda não estiverem no volume:
 
 ```bash
-docker compose exec ollama ollama pull qwen3.5:2b
+docker compose exec ollama ollama pull qwen3.5:2b                # chat (GPU)
+docker compose exec ollama-embed ollama pull qwen3-embedding:0.6b  # memória (CPU)
 ```
 
 Endereços:
@@ -121,6 +123,17 @@ Anexe pelo clipe, arraste e solte no campo de mensagem ou cole com Ctrl+V (até 
 - **Custo no contexto:** medido no `qwen3.5:2b`, cada bloco de 32×32 px custa 1 token. Uma imagem de 768×576 ocupa cerca de 434 tokens da janela de 4096.
 - **Histórico:** só as imagens da mensagem com imagem **mais recente** são reenviadas (para perguntas como "e a cor do carro?"). As mais antigas viram o texto `[o usuário enviou uma imagem aqui]`.
 
+## Memória (RAG)
+
+Cada troca concluída (pergunta + resposta) é dividida em trechos de cerca de 600 caracteres e transformada em vetores (embeddings) pelo `qwen3-embedding:0.6b`, um modelo multilíngue, bom em português. Os vetores ficam no **pgvector**. A cada mensagem nova, os trechos mais parecidos de **todas as conversas** são buscados por semelhança de cosseno e entram no prompt, até uma cota de 600 tokens.
+
+- **Um Ollama só para embeddings, na CPU** (`ollama-embed`, 2 CPUs e 1,5 GB): com um modelo por instância, o modelo de chat nunca sai da GPU para dar lugar aos embeddings. Mesmo assim, **todas as chamadas, das duas instâncias, passam pela mesma fila**: uma por vez.
+- **Indexação:** depois de cada resposta, em segundo plano. As conversas antigas são indexadas aos poucos (backfill), e **só quando a fila está ociosa**.
+- **Busca:** cerca de 0,3 s por pergunta. Trechos com semelhança abaixo de 0,45 são descartados. A parte da conversa atual que já está no histórico não é buscada de novo. Se o servidor de embeddings estiver fora, o chat funciona sem memória.
+- **Na interface:** respostas que usaram memória mostram "Lembrou de N conversas", com link para cada uma.
+- **Desligar por conversa** (painel de configuração): a conversa deixa de buscar memórias e de ser encontrada pelas outras. **Limite:** o que ela já tiver passado para respostas de outras conversas continua nelas.
+- **Sem índice HNSW:** na escala de um app local (milhares de trechos), a busca exata leva milissegundos e é precisa. O Prisma também não sabe representar esse índice e tentaria removê-lo a cada migration.
+
 ## Título e resumo automáticos
 
 Depois de cada resposta, duas tarefas rodam **em segundo plano**, uma depois da outra e pela mesma fila do modelo, com prioridade menor que o chat:
@@ -149,11 +162,12 @@ Os tokens são estimados antes do envio (cerca de 3 caracteres por token, de pro
 
 | Onde | O quê |
 |---|---|
-| Ollama | `OLLAMA_NUM_PARALLEL=1`, `OLLAMA_MAX_LOADED_MODELS=1`, `OLLAMA_MAX_QUEUE=10`, limite de 6 CPUs e 6 GB de RAM |
+| Ollama (GPU) | `OLLAMA_NUM_PARALLEL=1`, `OLLAMA_MAX_LOADED_MODELS=1`, `OLLAMA_MAX_QUEUE=10`, limite de 6 CPUs e 6 GB de RAM |
+| Ollama de embeddings (CPU) | As mesmas regras, sem GPU, com limite de 2 CPUs e 1,5 GB de RAM |
 | Contexto | `OLLAMA_CONTEXT_LENGTH` fixo (4096) a partir do `.env` |
 | Postgres | 512 MB de RAM, 1 CPU |
 | Backend / Frontend | 768 MB / 1,5 GB de RAM, 2 CPUs cada |
-| Backend | Fila com uma chamada ao modelo por vez (prioridade para o chat, até 10 na espera), timeout de primeiro token e total, e cancelamento ao fechar a conexão |
+| Backend | Fila única para chat, título, resumo e embeddings: uma chamada ao modelo por vez (prioridade para o chat, até 10 na espera), timeout de primeiro token e total, e cancelamento ao fechar a conexão |
 
 ## Segurança
 
@@ -168,4 +182,4 @@ Os tokens são estimados antes do envio (cerca de 3 caracteres por token, de pro
 - [x] **Fase 2:** várias conversas, título automático, resumo das antigas
 - [x] **Fase 3:** modelo, system prompt e temperatura por conversa
 - [x] **Fase 4:** imagens
-- [ ] **Fase 5:** memória com embeddings e RAG
+- [x] **Fase 5:** memória com embeddings e RAG

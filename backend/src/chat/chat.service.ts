@@ -28,6 +28,8 @@ import {
   type ChatMessage,
   type ChatRequest,
 } from '../llm/llm.types.js';
+import { formatMemory, type MemoryRef } from '../memory/memory.prompt.js';
+import { MemoryService } from '../memory/memory.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
   DEFAULT_SYSTEM_PROMPT,
@@ -56,6 +58,7 @@ export class ChatService implements OnApplicationBootstrap {
     private readonly llm: LlmService,
     private readonly jobs: BackgroundJobsService,
     private readonly attachments: AttachmentsService,
+    private readonly memory: MemoryService,
     private readonly env: EnvironmentVariables,
   ) {}
 
@@ -113,6 +116,15 @@ export class ChatService implements OnApplicationBootstrap {
       capabilities,
     );
 
+    // Long-term memory: one embedding (queued, CPU instance) + a vector
+    // search. Returns [] on any failure, so the chat never depends on it.
+    const hits = conversation.memoryEnabled
+      ? await this.memory.search(dto.content, {
+          conversationId,
+          summarizedUntil: conversation.summarizedUntil,
+        })
+      : [];
+
     // Messages already folded into the summary are not sent again as history.
     const plan = this.buildPlan({
       history: await this.loadHistory(
@@ -125,7 +137,16 @@ export class ChatService implements OnApplicationBootstrap {
       summary: conversation.summary,
       userImages: uploads.map((u) => this.imageRef(u)),
       visionEnabled: capabilities?.vision ?? true,
+      memories: hits.map(formatMemory),
     });
+    // The context keeps the most relevant ones that fit its quota.
+    const memoryRefs: MemoryRef[] = hits
+      .slice(0, plan.memoriesUsed)
+      .map(({ conversationId, conversationTitle, similarity }) => ({
+        conversationId,
+        conversationTitle,
+        similarity,
+      }));
 
     // One transaction: the user message, its images, and the placeholder
     // answer. Explicit timestamps keep user -> assistant ordering stable.
@@ -160,6 +181,7 @@ export class ChatService implements OnApplicationBootstrap {
             content: '',
             status: 'streaming',
             createdAt: new Date(now + 1),
+            ...(memoryRefs.length > 0 && { memories: memoryRefs }),
           },
         });
         return {
@@ -214,6 +236,7 @@ export class ChatService implements OnApplicationBootstrap {
         inputBudget: plan.inputBudget,
         summaryUsed: plan.summaryUsed,
         imagesSent: plan.imagesSent,
+        memoriesUsed: plan.memoriesUsed,
       },
     });
 
@@ -347,6 +370,7 @@ export class ChatService implements OnApplicationBootstrap {
     summary: string | null;
     userImages: ImageRef[];
     visionEnabled: boolean;
+    memories: string[];
   }): ContextPlan {
     try {
       return this.context.build({ ...input, userMessage: dto.content });

@@ -6,6 +6,7 @@ import type { ChatPhase, UiMessage } from "@/hooks/use-chat";
 import { errorMessage } from "@/lib/errors";
 import { ImageGallery } from "./image-gallery";
 import { Markdown } from "./markdown";
+import { MemoryNote } from "./memory-note";
 import { StreamStatus } from "./stream-status";
 import { ThinkingBlock } from "./thinking-block";
 
@@ -51,6 +52,7 @@ export function MessageItem({ message, phase }: { message: UiMessage; phase: Cha
           </div>
         )}
         <MessageNote message={message} />
+        {!streaming && <MemoryNote memories={message.memories ?? []} />}
       </div>
     </motion.div>
   );

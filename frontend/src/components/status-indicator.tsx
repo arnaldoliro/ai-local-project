@@ -29,7 +29,12 @@ export function StatusIndicator({ model, onClick }: { model: string | null; onCl
   const color = state.kind === "loading" ? "bg-muted" : ok ? "bg-success" : "bg-danger";
   const health =
     state.kind === "ready"
-      ? `Banco: ${state.health.database.detail ?? "?"} · Ollama: ${state.health.ollama.detail ?? "?"} · contexto ${state.health.contextWindow} tokens`
+      ? [
+          `Banco: ${state.health.database.detail ?? "?"}`,
+          `Ollama: ${state.health.ollama.detail ?? "?"}`,
+          `Memória: ${state.health.embeddings?.ok ? state.health.embeddings.detail : "indisponível"}`,
+          `Contexto: ${state.health.contextWindow} tokens`,
+        ].join(" · ")
       : state.kind === "offline"
         ? "Backend indisponível"
         : "Verificando…";
