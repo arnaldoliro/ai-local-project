@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { EnvironmentVariables } from '../config/env.validation.js';
+import { LlmService } from '../llm/llm.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 type DependencyStatus = { ok: boolean; detail?: string };
@@ -15,19 +16,23 @@ export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly env: EnvironmentVariables,
+    private readonly llm: LlmService,
   ) {}
 
   @Get()
   async check() {
-    const [database, ollama] = [
-      await this.checkDatabase(),
-      await this.checkOllama(),
-    ];
+    const database = await this.checkDatabase();
+    const ollama = await this.checkOllama();
+    // Memory is optional: chat works without it, so it doesn't degrade status.
+    const embeddings: DependencyStatus = (await this.llm.hasEmbeddingModel())
+      ? { ok: true, detail: this.env.EMBEDDING_MODEL }
+      : { ok: false, detail: `${this.env.EMBEDDING_MODEL} unavailable` };
 
     return {
       status: database.ok && ollama.ok ? 'ok' : 'degraded',
       database,
       ollama,
+      embeddings,
       contextWindow: this.env.LLM_CONTEXT_WINDOW,
       defaultModel: this.env.LLM_DEFAULT_MODEL,
     };

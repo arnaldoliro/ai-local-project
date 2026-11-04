@@ -137,7 +137,7 @@ export class ConversationsService {
    * system prompt is stored as null, i.e. "use the default".
    */
   private async settingsData(settings: ConversationSettingsDto) {
-    const { model, systemPrompt, temperature } = settings;
+    const { model, systemPrompt, temperature, memoryEnabled } = settings;
     if (model) await this.assertChatModel(model);
 
     return {
@@ -146,6 +146,7 @@ export class ConversationsService {
         systemPrompt: systemPrompt?.trim() || null,
       }),
       ...(temperature !== undefined && { temperature }),
+      ...(typeof memoryEnabled === 'boolean' && { memoryEnabled }),
     };
   }
 
@@ -167,6 +168,7 @@ export class ConversationsService {
       model?: string | null;
       systemPrompt?: string | null;
       temperature?: number | null;
+      memoryEnabled?: boolean;
     },
   ): Promise<ConversationDto> {
     const dto = toConversationDto(

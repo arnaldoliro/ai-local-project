@@ -7,6 +7,7 @@ import {
 import type { Subscription } from 'rxjs';
 import { ConversationEventsService } from '../conversations/conversation-events.service.js';
 import { LlmError } from '../llm/llm.errors.js';
+import { MemoryService } from '../memory/memory.service.js';
 import { SummaryService } from '../summaries/summary.service.js';
 import { TitleService } from '../titles/title.service.js';
 
@@ -14,7 +15,8 @@ import { TitleService } from '../titles/title.service.js';
 const MAX_PREEMPTION_RETRIES = 3;
 
 /**
- * Work that follows a completed answer: title, then summary.
+ * Work that follows a completed answer: title, then summary, then memory
+ * indexing (embeddings of the exchange).
  *
  * - Fire-and-forget for the chat (the user already has the answer).
  * - Per conversation, runs strictly one after the other: a new run is
@@ -35,6 +37,7 @@ export class BackgroundJobsService implements OnModuleInit, OnModuleDestroy {
     private readonly titles: TitleService,
     private readonly summaries: SummaryService,
     private readonly events: ConversationEventsService,
+    private readonly memory: MemoryService,
   ) {}
 
   onModuleInit(): void {
@@ -63,6 +66,8 @@ export class BackgroundJobsService implements OnModuleInit, OnModuleDestroy {
         await this.titles.generateIfNeeded(conversationId, signal);
         if (signal.aborted) return;
         await this.summaries.summarizeIfNeeded(conversationId, signal);
+        if (signal.aborted) return;
+        await this.memory.indexConversation(conversationId, signal);
       })
       .then(() => {
         this.retries.delete(conversationId);

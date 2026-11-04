@@ -64,6 +64,7 @@ function PanelBody({ onClose, value, isNewChat, onSave }: Props) {
   const [model, setModel] = useState(value.model ?? defaultModel);
   const [systemPrompt, setSystemPrompt] = useState(value.systemPrompt ?? "");
   const [modelTemperature, setModelTemperature] = useState(value.temperature === null);
+  const [memoryEnabled, setMemoryEnabled] = useState(value.memoryEnabled);
   const [temperature, setTemperature] = useState(value.temperature ?? DEFAULT_SLIDER_TEMPERATURE);
   const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -81,9 +82,13 @@ function PanelBody({ onClose, value, isNewChat, onSave }: Props) {
     model: model && model !== defaultModel ? model : null,
     systemPrompt: systemPrompt.trim() || null,
     temperature: modelTemperature ? null : round(temperature),
+    memoryEnabled,
   };
   const dirty =
-    next.model !== value.model || next.systemPrompt !== value.systemPrompt || next.temperature !== value.temperature;
+    next.model !== value.model ||
+    next.systemPrompt !== value.systemPrompt ||
+    next.temperature !== value.temperature ||
+    next.memoryEnabled !== value.memoryEnabled;
 
   const maxLength = defaults?.systemPromptMaxLength ?? 2000;
   // Same heuristic as the backend (~3 characters per token).
@@ -215,6 +220,18 @@ function PanelBody({ onClose, value, isNewChat, onSave }: Props) {
           <p className="mt-3 text-xs leading-relaxed text-muted/80">
             Valores baixos deixam as respostas mais previsíveis (bom para código e fatos); valores altos, mais
             variadas.
+          </p>
+        </Section>
+
+        <Section title="Memória">
+          <label className="flex cursor-pointer items-center justify-between gap-3 text-sm">
+            <span className="text-muted">Lembrar de outras conversas</span>
+            <Toggle checked={memoryEnabled} onChange={setMemoryEnabled} />
+          </label>
+          <p className="mt-3 text-xs leading-relaxed text-muted/80">
+            Ligada, o assistente busca trechos parecidos com a sua pergunta em conversas anteriores e os usa como
+            contexto. Desligada, esta conversa não busca memórias nem aparece nas buscas das outras: útil para assuntos
+            que devem ficar isolados.
           </p>
         </Section>
       </div>

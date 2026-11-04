@@ -15,6 +15,8 @@ const validEnv = {
   LLM_QUEUE_MAX_SIZE: '10',
   CONTEXT_MAX_HISTORY_MESSAGES: '20',
   UPLOADS_DIR: '/data/uploads',
+  EMBEDDING_API_URL: 'http://ollama-embed:11434',
+  EMBEDDING_MODEL: 'qwen3-embedding:0.6b',
 };
 
 describe('validateEnv', () => {

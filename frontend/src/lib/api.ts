@@ -11,6 +11,8 @@ export type HealthResponse = {
   status: "ok" | "degraded";
   database: DependencyStatus;
   ollama: DependencyStatus;
+  /** Memory (RAG); optional, so it doesn't affect `status`. */
+  embeddings: DependencyStatus;
   contextWindow: number;
   defaultModel: string;
 };
@@ -27,6 +29,13 @@ export type Attachment = {
   tokens: number;
 };
 
+/** A memory injected to produce an answer. */
+export type MemoryRef = {
+  conversationId: string;
+  conversationTitle: string | null;
+  similarity: number;
+};
+
 export type Message = {
   id: string;
   role: "user" | "assistant" | "system";
@@ -35,6 +44,8 @@ export type Message = {
   status: MessageStatus;
   createdAt: string;
   attachments: Attachment[];
+  /** Assistant messages: memories used to produce it. */
+  memories: MemoryRef[];
 };
 
 export const attachmentUrl = (id: string) => `${API_URL}/attachments/${id}`;
@@ -57,6 +68,8 @@ export type ConversationSettings = {
   model: string | null;
   systemPrompt: string | null;
   temperature: number | null;
+  /** Long-term memory: search other conversations and be searchable. */
+  memoryEnabled: boolean;
 };
 
 export type Conversation = ConversationSettings & {

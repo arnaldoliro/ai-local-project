@@ -1,4 +1,5 @@
 import type { ChatRole } from '../llm/llm.types.js';
+import { MEMORY_SECTION_HEADER } from '../memory/memory.prompt.js';
 import {
   estimateMessageTokens,
   PROMPT_OVERHEAD_TOKENS,
@@ -13,6 +14,8 @@ export interface ContextLimits {
   maxHistoryMessages: number;
   /** Extra slack for estimation error, as a fraction of the window. */
   safetyMarginRatio: number;
+  /** Fixed quota for retrieved memories (RAG), within the prompt budget. */
+  memoryMaxTokens: number;
 }
 
 /** An attached image, by reference: the builder only needs its cost. */
@@ -52,6 +55,8 @@ export interface BuildContextInput {
   userImages?: ImageRef[];
   /** False when the model can't see images: history images become text. */
   visionEnabled?: boolean;
+  /** Retrieved memories (Phase 5), already formatted, most relevant first. */
+  memories?: string[];
 }
 
 export interface ContextPlan {
@@ -64,6 +69,8 @@ export interface ContextPlan {
   summaryUsed: boolean;
   /** Images sent in this request (current message + history). */
   imagesSent: number;
+  /** How many of the given memories fit (the first N). */
+  memoriesUsed: number;
 }
 
 /**
@@ -88,12 +95,16 @@ const imagesCost = (images: ImageRef[] = []) =>
 export function composeSystemPrompt(
   systemPrompt: string,
   summary?: string | null,
+  memories: string[] = [],
 ): string {
-  if (!summary) return systemPrompt;
-  const section =
-    'Resumo da conversa até aqui (mensagens anteriores que não aparecem abaixo):\n' +
-    summary;
-  return systemPrompt ? `${systemPrompt}\n\n${section}` : section;
+  const sections = [
+    systemPrompt,
+    summary &&
+      'Resumo da conversa até aqui (mensagens anteriores que não aparecem abaixo):\n' +
+        summary,
+    memories.length > 0 && `${MEMORY_SECTION_HEADER}\n${memories.join('\n')}`,
+  ];
+  return sections.filter(Boolean).join('\n\n');
 }
 
 export class ContextOverflowError extends Error {
@@ -118,7 +129,9 @@ export class ContextOverflowError extends Error {
  *   2. current user message     (mandatory; if 1+2 don't fit -> error)
  *   3. summary of old messages  (inside the system message; dropped first
  *                                if 1+2+3 don't fit)
- *   4. previous messages, newest first, until the budget or the cap runs out
+ *   4. retrieved memories       (inside the system message, most relevant
+ *                                first, up to a fixed token quota)
+ *   5. previous messages, newest first, until the budget or the cap runs out
  *
  * History is kept contiguous: once a message doesn't fit, everything older
  * is dropped too, so the model never sees a conversation with holes.
@@ -126,7 +139,6 @@ export class ContextOverflowError extends Error {
  * Images (Phase 4) cost hundreds of tokens each, so only the most recent
  * history message with images re-sends them (that's what follow-up
  * questions refer to); older ones keep a text placeholder.
- * Phase 5 adds RAG snippets.
  *
  * Pure class (no I/O, no Nest): trivially unit-testable.
  */
@@ -160,6 +172,7 @@ export class ContextBuilder {
     summary,
     userImages = [],
     visionEnabled = true,
+    memories = [],
   }: BuildContextInput): ContextPlan {
     const budget = this.inputBudgetFor(maxOutputTokens);
     const userCost =
@@ -169,19 +182,35 @@ export class ContextBuilder {
     const systemCost = (text: string) =>
       text ? estimateMessageTokens(text) : 0;
 
-    // Try with the summary; without it if the message is too big for both.
-    let system = composeSystemPrompt(systemPrompt, summary);
-    let summaryUsed = Boolean(summary);
-    let mandatory = systemCost(system) + userCost;
-    if (summaryUsed && mandatory > budget) {
-      system = systemPrompt;
-      summaryUsed = false;
-      mandatory = systemCost(system) + userCost;
+    const required = systemCost(systemPrompt) + userCost;
+    if (required > budget) {
+      throw new ContextOverflowError(required, Math.max(0, budget));
+    }
+    const fits = (text: string) => systemCost(text) + userCost <= budget;
+
+    // Summary if it fits next to the mandatory parts.
+    const summaryUsed =
+      Boolean(summary) && fits(composeSystemPrompt(systemPrompt, summary));
+    const keptSummary = summaryUsed ? summary : null;
+
+    // Memories one by one, while within their quota and the budget. Costs
+    // are measured on the composed text, so the estimate stays exact.
+    const withoutMemories = systemCost(
+      composeSystemPrompt(systemPrompt, keptSummary),
+    );
+    const keptMemories: string[] = [];
+    for (const memory of memories) {
+      const candidate = composeSystemPrompt(systemPrompt, keptSummary, [
+        ...keptMemories,
+        memory,
+      ]);
+      const memoryCost = systemCost(candidate) - withoutMemories;
+      if (memoryCost > this.limits.memoryMaxTokens || !fits(candidate)) break;
+      keptMemories.push(memory);
     }
 
-    if (mandatory > budget) {
-      throw new ContextOverflowError(mandatory, Math.max(0, budget));
-    }
+    const system = composeSystemPrompt(systemPrompt, keptSummary, keptMemories);
+    const mandatory = systemCost(system) + userCost;
 
     const cap = Math.max(0, this.limits.maxHistoryMessages);
     const candidates = cap === 0 ? [] : history.slice(-cap);
@@ -239,6 +268,7 @@ export class ContextBuilder {
       droppedHistory: history.length - selected.length,
       summaryUsed,
       imagesSent,
+      memoriesUsed: keptMemories.length,
     };
   }
 }

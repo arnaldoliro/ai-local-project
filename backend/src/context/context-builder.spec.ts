@@ -18,6 +18,7 @@ const limits: ContextLimits = {
   maxOutputTokens: 1024,
   maxHistoryMessages: 20,
   safetyMarginRatio: 0.1,
+  memoryMaxTokens: 600,
 };
 
 /** A message whose estimated cost is exactly `tokens` (overhead included). */
@@ -224,6 +225,64 @@ describe('ContextBuilder', () => {
 
     expect(plan.summaryUsed).toBe(false);
     expect(plan.messages).toHaveLength(1);
+  });
+
+  describe('memories', () => {
+    it('adds memories to the system message after the summary', () => {
+      const plan = new ContextBuilder(limits).build({
+        systemPrompt: 'be nice',
+        history: [],
+        userMessage: 'when is the deadline?',
+        summary: 'project Atlas',
+        memories: ['- [Atlas] deadline is Dec 15'],
+      });
+
+      const system = plan.messages[0].content;
+      expect(plan.memoriesUsed).toBe(1);
+      expect(system.indexOf('project Atlas')).toBeLessThan(
+        system.indexOf('deadline is Dec 15'),
+      );
+      expect(plan.messages.filter((m) => m.role === 'system')).toHaveLength(1);
+    });
+
+    it('stops at the memory quota, keeping the most relevant first', () => {
+      const memory = (n: number) => `- [m${n}] ${'x'.repeat(600)}`; // ~200 tokens each
+      const plan = new ContextBuilder(limits).build({
+        systemPrompt: '',
+        history: [],
+        userMessage: 'hi',
+        memories: [memory(1), memory(2), memory(3), memory(4)],
+      });
+
+      expect(plan.memoriesUsed).toBe(2);
+      expect(plan.messages[0].content).toContain('[m1]');
+      expect(plan.messages[0].content).not.toContain('[m3]');
+    });
+
+    it('gives memories priority over history, within their quota', () => {
+      const history = turns(20, sized(150).slice(0, -3));
+      const plan = new ContextBuilder(limits).build({
+        systemPrompt: '',
+        history,
+        userMessage: 'hi',
+        memories: ['- [m1] short memory'],
+      });
+
+      expect(plan.memoriesUsed).toBe(1);
+      expect(plan.droppedHistory).toBeGreaterThan(0);
+      expect(plan.estimatedPromptTokens).toBeLessThanOrEqual(plan.inputBudget);
+    });
+
+    it('drops memories that do not fit next to a big message', () => {
+      const plan = new ContextBuilder(limits).build({
+        systemPrompt: '',
+        history: [],
+        userMessage: sized(2600),
+        memories: ['- [m1] some memory'],
+      });
+
+      expect(plan.memoriesUsed).toBe(0);
+    });
   });
 
   describe('images', () => {

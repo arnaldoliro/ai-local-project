@@ -2,7 +2,12 @@ import { LlmError } from '../llm/llm.errors.js';
 import { ConversationEventsService } from '../conversations/conversation-events.service.js';
 import type { SummaryService } from '../summaries/summary.service.js';
 import type { TitleService } from '../titles/title.service.js';
+import type { MemoryService } from '../memory/memory.service.js';
 import { BackgroundJobsService } from './background-jobs.service.js';
+
+const noMemory = {
+  indexConversation: async () => {},
+} as unknown as MemoryService;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -33,6 +38,7 @@ describe('BackgroundJobsService', () => {
       titles,
       summaries,
       new ConversationEventsService(),
+      noMemory,
     );
 
     jobs.afterExchange('a');
@@ -67,6 +73,7 @@ describe('BackgroundJobsService', () => {
       titles,
       summaries,
       new ConversationEventsService(),
+      noMemory,
     );
 
     jobs.afterExchange('a');
@@ -78,7 +85,7 @@ describe('BackgroundJobsService', () => {
   it('aborts pending work when the conversation is deleted', async () => {
     const { titles, summaries, log } = fakes();
     const events = new ConversationEventsService();
-    const jobs = new BackgroundJobsService(titles, summaries, events);
+    const jobs = new BackgroundJobsService(titles, summaries, events, noMemory);
     jobs.onModuleInit();
 
     jobs.afterExchange('a');

@@ -4,6 +4,7 @@ import { BackgroundModule } from '../background/background.module.js';
 import { ContextModule } from '../context/context.module.js';
 import { ConversationsModule } from '../conversations/conversations.module.js';
 import { LlmModule } from '../llm/llm.module.js';
+import { MemoryModule } from '../memory/memory.module.js';
 import { ChatController } from './chat.controller.js';
 import { ChatService } from './chat.service.js';
 import { SettingsController } from './settings.controller.js';
@@ -15,6 +16,7 @@ import { SettingsController } from './settings.controller.js';
     LlmModule,
     BackgroundModule,
     AttachmentsModule,
+    MemoryModule,
   ],
   controllers: [ChatController, SettingsController],
   providers: [ChatService],

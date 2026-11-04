@@ -96,6 +96,13 @@ export class EnvironmentVariables {
   @Max(50)
   LLM_QUEUE_MAX_SIZE: number;
 
+  /** CPU-only Ollama instance that serves the embedding model. */
+  @IsUrl({ require_tld: false })
+  EMBEDDING_API_URL: string;
+
+  @IsString()
+  EMBEDDING_MODEL: string;
+
   /** Where uploaded images are stored (a Docker volume). */
   @IsString()
   UPLOADS_DIR: string;

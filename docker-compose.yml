@@ -41,6 +41,33 @@ services:
       timeout: 5s
       retries: 5
 
+  # Second Ollama, CPU only, just for the embedding model. With one model
+  # per instance (MAX_LOADED_MODELS=1), the chat model never leaves the GPU
+  # to make room for embeddings. No GPU reservation = no GPU access.
+  # Not published: only the backend talks to it. Calls still go through the
+  # backend's single queue, so there is never more than one model call.
+  ollama-embed:
+    image: ollama/ollama:0.40.14
+    restart: unless-stopped
+    environment:
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_MAX_QUEUE: "10"
+      OLLAMA_CONTEXT_LENGTH: "2048"   # chunks are ~400 tokens
+      OLLAMA_KEEP_ALIVE: "30m"        # small model: keep it warm in RAM
+    volumes:
+      - ollama:/root/.ollama          # same models volume as the GPU instance
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1536m
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   postgres:
     image: pgvector/pgvector:pg17
     restart: unless-stopped
@@ -72,6 +99,8 @@ services:
         condition: service_healthy
       ollama:
         condition: service_healthy
+      ollama-embed:
+        condition: service_healthy
     environment:
       PORT: "3001"
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -87,6 +116,8 @@ services:
       LLM_QUEUE_MAX_SIZE: "10"   # same as OLLAMA_MAX_QUEUE
       CONTEXT_MAX_HISTORY_MESSAGES: ${CONTEXT_MAX_HISTORY_MESSAGES:-20}
       UPLOADS_DIR: /data/uploads
+      EMBEDDING_API_URL: http://ollama-embed:11434
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-qwen3-embedding:0.6b}
     ports:
       - "127.0.0.1:3001:3001"
     volumes:

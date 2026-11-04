@@ -1,5 +1,6 @@
 import { Transform } from 'class-transformer';
 import {
+  IsBoolean,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -35,6 +36,11 @@ export class ConversationSettingsDto {
   @Min(TEMPERATURE_MIN)
   @Max(TEMPERATURE_MAX)
   temperature?: number | null;
+
+  /** Long-term memory for this conversation (search + being searchable). */
+  @IsOptional()
+  @IsBoolean()
+  memoryEnabled?: boolean;
 }
 
 export class UpdateConversationDto extends ConversationSettingsDto {
