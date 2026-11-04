@@ -14,7 +14,7 @@ import { ConversationItem } from "./conversation-item";
 export const activeIdFrom = (pathname: string) => pathname.match(/^\/c\/([^/]+)/)?.[1] ?? null;
 
 export function Sidebar({ onNavigate }: { onNavigate: () => void }) {
-  const { conversations, loaded, rename, remove } = useConversations();
+  const { conversations, loaded, update, remove } = useConversations();
   const pathname = usePathname();
   const router = useRouter();
   const activeId = activeIdFrom(pathname);
@@ -70,7 +70,7 @@ export function Sidebar({ onNavigate }: { onNavigate: () => void }) {
                     conversation={conversation}
                     active={conversation.id === activeId}
                     onNavigate={onNavigate}
-                    onRename={(title) => rename(conversation.id, title)}
+                    onRename={(title) => update(conversation.id, { title })}
                     onDelete={() => setToDelete(conversation)}
                   />
                 ))}

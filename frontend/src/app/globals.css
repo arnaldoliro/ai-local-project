@@ -189,3 +189,33 @@ body {
 .hljs-deletion { color: var(--danger); }
 .hljs-emphasis { font-style: italic; }
 .hljs-strong { font-weight: 600; }
+
+/* ---------- Range slider (temperature) ---------- */
+
+.range {
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  cursor: pointer;
+}
+.range::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 35%, transparent);
+  transition: box-shadow 0.15s;
+}
+.range::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 0 6px color-mix(in oklab, var(--accent) 35%, transparent);
+}
+.range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 35%, transparent);
+}

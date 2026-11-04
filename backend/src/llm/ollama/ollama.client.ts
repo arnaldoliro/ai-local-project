@@ -2,7 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { EnvironmentVariables } from '../../config/env.validation.js';
 import { LlmClient } from '../llm-client.js';
 import { LlmError } from '../llm.errors.js';
-import type { ChatChunk, ChatRequest } from '../llm.types.js';
+import type { ChatChunk, ChatRequest, ModelInfo } from '../llm.types.js';
+import { toModelInfo, type OllamaTag } from './ollama-models.js';
 import { readLines } from './read-lines.js';
 
 /** Shape of each NDJSON line streamed by POST /api/chat. */
@@ -44,7 +45,8 @@ export class OllamaClient extends LlmClient {
       model: request.model,
       messages: request.messages,
       stream: true,
-      think: request.think,
+      // Omitted (undefined) for models without the thinking capability.
+      ...(request.think !== undefined && { think: request.think }),
       options: {
         num_predict: request.maxOutputTokens,
         ...(request.temperature !== undefined && {
@@ -89,6 +91,26 @@ export class OllamaClient extends LlmClient {
       models?: { name: string; model: string }[];
     };
     return (models ?? []).some((m) => m.name === model || m.model === model);
+  }
+
+  /** GET /api/tags lists installed models; it never loads anything. */
+  async listModels(): Promise<ModelInfo[]> {
+    let response: Response;
+    try {
+      response = await fetch(`${this.env.OLLAMA_API_URL}/api/tags`, {
+        signal: AbortSignal.timeout(5000),
+      });
+    } catch (error) {
+      throw new LlmError(
+        'unavailable',
+        `Ollama unreachable: ${(error as Error).message}`,
+      );
+    }
+    if (!response.ok) {
+      throw new LlmError('unavailable', `Ollama HTTP ${response.status}`);
+    }
+    const { models } = (await response.json()) as { models?: OllamaTag[] };
+    return (models ?? []).map(toModelInfo);
   }
 
   private async post(

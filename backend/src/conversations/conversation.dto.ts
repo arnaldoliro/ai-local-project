@@ -13,6 +13,10 @@ export interface MessageDto {
 export interface ConversationDto {
   id: string;
   title: string | null;
+  /** null = default (see GET /settings/defaults). */
+  model: string | null;
+  systemPrompt: string | null;
+  temperature: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -33,6 +37,9 @@ export const toMessageDto = (m: Message): MessageDto => ({
 export const toConversationDto = (c: Conversation): ConversationDto => ({
   id: c.id,
   title: c.title,
+  model: c.model,
+  systemPrompt: c.systemPrompt,
+  temperature: c.temperature,
   createdAt: c.createdAt.toISOString(),
   updatedAt: c.updatedAt.toISOString(),
 });

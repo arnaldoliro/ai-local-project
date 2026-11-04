@@ -1,6 +1,7 @@
 import { Suspense, type ReactNode } from "react";
 import { ChatHost } from "@/components/chat/chat-host";
 import { ConversationsProvider } from "@/components/conversations/conversations-provider";
+import { SettingsDataProvider } from "@/components/settings/settings-data";
 import { Shell } from "@/components/shell/shell";
 
 /**
@@ -11,13 +12,15 @@ import { Shell } from "@/components/shell/shell";
 export default function ChatLayout({ children }: { children: ReactNode }) {
   return (
     <ConversationsProvider>
-      <Shell>
+      <SettingsDataProvider>
+        <Shell>
         {/* usePathname() may suspend on dynamic routes (Cache Components). */}
         <Suspense fallback={<div className="flex-1" />}>
           <ChatHost />
         </Suspense>
         {children}
-      </Shell>
+        </Shell>
+      </SettingsDataProvider>
     </ConversationsProvider>
   );
 }

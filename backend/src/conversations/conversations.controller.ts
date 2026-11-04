@@ -10,7 +10,10 @@ import {
   Post,
 } from '@nestjs/common';
 import { ConversationsService } from './conversations.service.js';
-import { RenameConversationDto } from './rename-conversation.dto.js';
+import {
+  ConversationSettingsDto,
+  UpdateConversationDto,
+} from './conversation-settings.dto.js';
 
 @Controller('conversations')
 export class ConversationsController {
@@ -21,9 +24,10 @@ export class ConversationsController {
     return this.conversations.list();
   }
 
+  /** Body optional: a new chat may be configured before the first message. */
   @Post()
-  create() {
-    return this.conversations.create();
+  create(@Body() dto?: ConversationSettingsDto) {
+    return this.conversations.create(dto ?? {});
   }
 
   @Get(':id')
@@ -31,12 +35,13 @@ export class ConversationsController {
     return this.conversations.getWithMessages(id);
   }
 
+  /** Rename and/or change settings. */
   @Patch(':id')
-  rename(
+  update(
     @Param('id', new ParseUUIDPipe()) id: string,
-    @Body() dto: RenameConversationDto,
+    @Body() dto: UpdateConversationDto,
   ) {
-    return this.conversations.rename(id, dto.title);
+    return this.conversations.update(id, dto);
   }
 
   @Delete(':id')

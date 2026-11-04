@@ -1,4 +1,4 @@
-import type { ChatChunk, ChatRequest } from './llm.types.js';
+import type { ChatChunk, ChatRequest, ModelInfo } from './llm.types.js';
 
 /**
  * Provider-agnostic contract. The rest of the app never knows it is talking
@@ -17,4 +17,7 @@ export abstract class LlmClient {
 
   /** Whether the model is already in memory (a call will not pay the load time). */
   abstract isModelLoaded(model: string): Promise<boolean>;
+
+  /** Installed models with their capabilities. Must not load any model. */
+  abstract listModels(): Promise<ModelInfo[]>;
 }

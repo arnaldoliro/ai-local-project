@@ -3,7 +3,12 @@ import { EnvironmentVariables } from '../config/env.validation.js';
 import { LlmClient } from './llm-client.js';
 import { LlmError, type LlmErrorCode } from './llm.errors.js';
 import { LlmQueue } from './llm-queue.js';
-import type { ChatChunk, ChatRequest, ChatResult } from './llm.types.js';
+import type {
+  ChatChunk,
+  ChatRequest,
+  ChatResult,
+  ModelInfo,
+} from './llm.types.js';
 import { LlmPriority } from './llm.types.js';
 
 export interface ChatCallOptions {
@@ -24,6 +29,8 @@ export interface ChatCallOptions {
  * on timeout or on shutdown. Aborting the HTTP request makes Ollama stop
  * generating, which frees the GPU immediately.
  */
+const MODELS_CACHE_MS = 10_000;
+
 @Injectable()
 export class LlmService implements OnModuleDestroy {
   private readonly logger = new Logger(LlmService.name);
@@ -31,12 +38,34 @@ export class LlmService implements OnModuleDestroy {
   private readonly shutdown = new AbortController();
   /** The call currently on the model, so a chat can preempt background work. */
   private running: { priority: LlmPriority; preempt: () => void } | null = null;
+  private modelsCache: { models: ModelInfo[]; expiresAt: number } | null = null;
 
   constructor(
     private readonly client: LlmClient,
     private readonly env: EnvironmentVariables,
   ) {
     this.queue = new LlmQueue(env.LLM_QUEUE_MAX_SIZE);
+  }
+
+  /**
+   * Installed models. Cached for a few seconds: every chat message checks
+   * its model's capabilities, and that shouldn't mean an HTTP call each time.
+   * Listing never loads a model, so it doesn't go through the queue.
+   */
+  async listModels(): Promise<ModelInfo[]> {
+    const now = Date.now();
+    if (this.modelsCache && this.modelsCache.expiresAt > now) {
+      return this.modelsCache.models;
+    }
+    const models = await this.client.listModels();
+    this.modelsCache = { models, expiresAt: now + MODELS_CACHE_MS };
+    return models;
+  }
+
+  /** null when the model isn't installed (or Ollama is unreachable). */
+  async findModel(name: string): Promise<ModelInfo | null> {
+    const models = await this.listModels().catch(() => []);
+    return models.find((m) => m.name === name) ?? null;
   }
 
   /** Lets callers reject early (HTTP 503) instead of persisting doomed work. */

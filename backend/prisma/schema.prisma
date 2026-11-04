@@ -32,6 +32,11 @@ model Conversation {
   /// createdAt of the last message covered by `summary`. Newer messages are
   /// sent as history; older ones only reach the model through the summary.
   summarizedUntil DateTime? @map("summarized_until")
+  /// Per-conversation settings. null = use the default (env model, default
+  /// system prompt, the model's own temperature).
+  model           String?
+  systemPrompt    String?   @map("system_prompt")
+  temperature     Float?
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
   messages        Message[]
