@@ -5,12 +5,14 @@ import {
   PayloadTooLargeException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { BackgroundJobsService } from '../background/background-jobs.service.js';
 import { EnvironmentVariables } from '../config/env.validation.js';
 import {
   ContextBuilder,
   ContextOverflowError,
   type ContextPlan,
 } from '../context/context-builder.js';
+import { CONTEXT_MESSAGE_FILTER } from '../conversations/context-messages.js';
 import { toMessageDto } from '../conversations/conversation.dto.js';
 import { ConversationsService } from '../conversations/conversations.service.js';
 import type { Message } from '../generated/prisma/client.js';
@@ -44,6 +46,7 @@ export class ChatService implements OnApplicationBootstrap {
     private readonly conversations: ConversationsService,
     private readonly context: ContextBuilder,
     private readonly llm: LlmService,
+    private readonly jobs: BackgroundJobsService,
     private readonly env: EnvironmentVariables,
   ) {}
 
@@ -65,7 +68,7 @@ export class ChatService implements OnApplicationBootstrap {
     conversationId: string,
     dto: SendMessageDto,
   ): Promise<PreparedChat> {
-    await this.conversations.getOrThrow(conversationId);
+    const conversation = await this.conversations.getOrThrow(conversationId);
 
     if (!this.llm.hasCapacity()) {
       throw new ServiceUnavailableException({
@@ -80,10 +83,12 @@ export class ChatService implements OnApplicationBootstrap {
     const maxOutputTokens = think
       ? this.env.LLM_MAX_OUTPUT_TOKENS_THINKING
       : this.env.LLM_MAX_OUTPUT_TOKENS;
+    // Messages already folded into the summary are not sent again as history.
     const plan = this.buildPlan(
-      await this.loadHistory(conversationId),
+      await this.loadHistory(conversationId, conversation.summarizedUntil),
       dto,
       maxOutputTokens,
+      conversation.summary,
     );
 
     // Explicit timestamps keep user -> assistant ordering stable.
@@ -141,6 +146,7 @@ export class ChatService implements OnApplicationBootstrap {
         droppedHistory: plan.droppedHistory,
         estimatedPromptTokens: plan.estimatedPromptTokens,
         inputBudget: plan.inputBudget,
+        summaryUsed: plan.summaryUsed,
       },
     });
 
@@ -186,6 +192,9 @@ export class ChatService implements OnApplicationBootstrap {
           totalDurationMs: result.totalDurationMs,
         },
       });
+
+      // Title and summary run afterwards, in the background, at low priority.
+      this.jobs.afterExchange(prepared.conversationId);
     } catch (error) {
       const llmError =
         error instanceof LlmError
@@ -211,15 +220,16 @@ export class ChatService implements OnApplicationBootstrap {
     }
   }
 
-  /**
-   * Only what the model should see: user messages and complete answers.
-   * Failed or aborted answers are not fed back as if they were real replies.
-   */
-  private async loadHistory(conversationId: string) {
+  /** Newest messages after the summary boundary, oldest first. */
+  private async loadHistory(
+    conversationId: string,
+    summarizedUntil: Date | null,
+  ) {
     const recent = await this.prisma.message.findMany({
       where: {
         conversationId,
-        OR: [{ role: 'user' }, { role: 'assistant', status: 'complete' }],
+        ...CONTEXT_MESSAGE_FILTER,
+        ...(summarizedUntil && { createdAt: { gt: summarizedUntil } }),
       },
       orderBy: { createdAt: 'desc' },
       // The builder caps history anyway; no need to read more rows than that.
@@ -236,6 +246,7 @@ export class ChatService implements OnApplicationBootstrap {
     history: { role: 'user' | 'assistant'; content: string }[],
     dto: SendMessageDto,
     maxOutputTokens: number,
+    summary: string | null,
   ): ContextPlan {
     try {
       return this.context.build({
@@ -243,6 +254,7 @@ export class ChatService implements OnApplicationBootstrap {
         history,
         userMessage: dto.content,
         maxOutputTokens,
+        summary,
       });
     } catch (error) {
       if (error instanceof ContextOverflowError) {

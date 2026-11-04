@@ -3,6 +3,8 @@ export type LlmErrorCode =
   | 'timeout_first_token'
   | 'timeout_total'
   | 'aborted'
+  /** Background call interrupted so a user's chat doesn't have to wait. */
+  | 'preempted'
   | 'unavailable'
   | 'model_not_found'
   | 'model_error';

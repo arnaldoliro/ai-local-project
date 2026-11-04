@@ -64,13 +64,33 @@ export async function toApiError(response: Response): Promise<ApiError> {
 export const fetchHealth = (signal?: AbortSignal) =>
   request<HealthResponse>("/health", { signal });
 
-export const fetchCurrentConversation = (signal?: AbortSignal) =>
-  request<{ conversation: ConversationWithMessages | null }>("/conversations/current", {
-    signal,
-  });
+export const listConversations = (signal?: AbortSignal) =>
+  request<Conversation[]>("/conversations", { signal });
+
+export const fetchConversation = (id: string, signal?: AbortSignal) =>
+  request<ConversationWithMessages>(`/conversations/${id}`, { signal });
 
 export const createConversation = () =>
   request<Conversation>("/conversations", { method: "POST" });
+
+export const renameConversation = (id: string, title: string) =>
+  request<Conversation>(`/conversations/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+
+export async function deleteConversation(id: string): Promise<void> {
+  const response = await fetch(`${API_URL}/conversations/${id}`, { method: "DELETE" });
+  if (!response.ok && response.status !== 404) throw await toApiError(response);
+}
+
+/** Server push: conversation created/renamed/titled/deleted. */
+export type ConversationEvent =
+  | { type: "conversation.updated"; conversation: Conversation }
+  | { type: "conversation.deleted"; id: string };
+
+export const EVENTS_URL = `${API_URL}/events`;
 
 /** Opens the SSE stream. The caller reads `response.body` with `readSse`. */
 export async function postMessage(

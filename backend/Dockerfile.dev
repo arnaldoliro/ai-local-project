@@ -2,9 +2,13 @@
 # by docker-compose.yml so `nest start --watch` reloads on every save.
 FROM node:24-bookworm-slim
 
-# Prisma's schema engine (migrations) needs OpenSSL.
+# - openssl: Prisma's schema engine (migrations) needs it.
+# - procps (`ps`): `nest start --watch` kills the old process tree with
+#   tree-kill, which shells out to `ps`. Without it only the wrapper shell
+#   dies, the old Node process keeps port 3001 and every hot reload fails
+#   with EADDRINUSE.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssl \
+  && apt-get install -y --no-install-recommends openssl procps \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

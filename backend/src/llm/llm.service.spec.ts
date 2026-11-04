@@ -125,4 +125,53 @@ describe('LlmService', () => {
     await expect(call).rejects.toMatchObject({ code: 'aborted' });
     expect(providerSawAbort).toBe(true);
   });
+
+  describe('preemption', () => {
+    /** Echoes the model name; "slow-*" models take `delay` ms to finish. */
+    class EchoClient extends LlmClient {
+      async *streamChat(req: ChatRequest, signal: AbortSignal) {
+        yield { type: 'content' as const, text: req.model };
+        if (req.model.startsWith('slow')) await sleep(100, signal);
+        yield done;
+      }
+      isModelLoaded() {
+        return Promise.resolve(true);
+      }
+    }
+    const started = () => new Promise((resolve) => setTimeout(resolve, 10));
+
+    it('interrupts background work so a chat does not wait for it', async () => {
+      const service = new LlmService(new EchoClient(), env);
+
+      const summary = service.complete(
+        { ...request, model: 'slow-summary' },
+        { priority: LlmPriority.Summary },
+      );
+      await started();
+      const chat = service.complete(
+        { ...request, model: 'chat' },
+        { priority: LlmPriority.Chat },
+      );
+
+      await expect(summary).rejects.toMatchObject({ code: 'preempted' });
+      await expect(chat).resolves.toMatchObject({ content: 'chat' });
+    });
+
+    it('never interrupts another chat', async () => {
+      const service = new LlmService(new EchoClient(), env);
+
+      const first = service.complete(
+        { ...request, model: 'slow-chat' },
+        { priority: LlmPriority.Chat },
+      );
+      await started();
+      const second = service.complete(
+        { ...request, model: 'chat' },
+        { priority: LlmPriority.Chat },
+      );
+
+      await expect(first).resolves.toMatchObject({ content: 'slow-chat' });
+      await expect(second).resolves.toMatchObject({ content: 'chat' });
+    });
+  });
 });
