@@ -14,6 +14,7 @@ const validEnv = {
   LLM_TOTAL_TIMEOUT_MS: '300000',
   LLM_QUEUE_MAX_SIZE: '10',
   CONTEXT_MAX_HISTORY_MESSAGES: '20',
+  UPLOADS_DIR: '/data/uploads',
 };
 
 describe('validateEnv', () => {

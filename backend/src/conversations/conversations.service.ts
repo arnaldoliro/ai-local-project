@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { Conversation } from '../generated/prisma/client.js';
+import { AttachmentsService } from '../attachments/attachments.service.js';
 import { LlmService } from '../llm/llm.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
@@ -27,6 +28,7 @@ export class ConversationsService {
     private readonly prisma: PrismaService,
     private readonly events: ConversationEventsService,
     private readonly llm: LlmService,
+    private readonly attachments: AttachmentsService,
   ) {}
 
   async list(): Promise<ConversationDto[]> {
@@ -49,7 +51,12 @@ export class ConversationsService {
   async getWithMessages(id: string): Promise<ConversationWithMessagesDto> {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id },
-      include: { messages: { orderBy: { createdAt: 'asc' } } },
+      include: {
+        messages: {
+          orderBy: { createdAt: 'asc' },
+          include: { attachments: { orderBy: { createdAt: 'asc' } } },
+        },
+      },
     });
     if (!conversation) throw new NotFoundException('Conversation not found');
 
@@ -78,10 +85,15 @@ export class ConversationsService {
     });
   }
 
-  /** Messages go with it (ON DELETE CASCADE). */
+  /**
+   * Messages and attachment rows go by cascade; image files are removed from
+   * disk afterwards (their names are read first, while the rows still exist).
+   */
   async delete(id: string): Promise<void> {
     await this.getOrThrow(id);
+    const files = await this.attachments.fileNamesOfConversation(id);
     await this.prisma.conversation.delete({ where: { id } });
+    await this.attachments.removeFiles(files);
     this.events.emit({ type: 'conversation.deleted', id });
   }
 

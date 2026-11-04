@@ -86,11 +86,13 @@ services:
       LLM_TOTAL_TIMEOUT_MS: ${LLM_TOTAL_TIMEOUT_MS:-300000}
       LLM_QUEUE_MAX_SIZE: "10"   # same as OLLAMA_MAX_QUEUE
       CONTEXT_MAX_HISTORY_MESSAGES: ${CONTEXT_MAX_HISTORY_MESSAGES:-20}
+      UPLOADS_DIR: /data/uploads
     ports:
       - "127.0.0.1:3001:3001"
     volumes:
       - ./backend:/app
       - /app/node_modules   # keep the container's node_modules, not the host's
+      - uploads:/data/uploads   # images attached to messages
     deploy:
       resources:
         limits:
@@ -124,3 +126,4 @@ volumes:
   ollama:
     external: true
   pgdata:
+  uploads:

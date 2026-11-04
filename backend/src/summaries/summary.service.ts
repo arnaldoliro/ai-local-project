@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { EnvironmentVariables } from '../config/env.validation.js';
 import { CONTEXT_MESSAGE_FILTER } from '../conversations/context-messages.js';
 import { ConversationsService } from '../conversations/conversations.service.js';
+import { withImagePlaceholder } from '../context/context-builder.js';
 import { LlmService } from '../llm/llm.service.js';
 import { noThinking } from '../chat/chat-settings.js';
 import { LlmPriority } from '../llm/llm.types.js';
@@ -120,11 +121,19 @@ export class SummaryService {
         ...(summarizedUntil && { createdAt: { gt: summarizedUntil } }),
       },
       orderBy: { createdAt: 'asc' },
-      select: { role: true, content: true, createdAt: true },
+      select: {
+        role: true,
+        content: true,
+        createdAt: true,
+        _count: { select: { attachments: true } },
+      },
     });
+    // The summarizer reads text only: images become a marker.
     return rows.map((r) => ({
       role: r.role as SummarizableMessage['role'],
-      content: r.content,
+      content: r._count.attachments
+        ? withImagePlaceholder(r.content, r._count.attachments)
+        : r.content,
       createdAt: r.createdAt,
     }));
   }
