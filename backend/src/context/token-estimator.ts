@@ -27,3 +27,11 @@ export function estimateTextTokens(text: string): number {
 export function estimateMessageTokens(content: string): number {
   return estimateTextTokens(content) + MESSAGE_OVERHEAD_TOKENS;
 }
+
+/** Cuts text to roughly `tokens` tokens, marking the cut with an ellipsis. */
+export function truncateToTokens(text: string, tokens: number): string {
+  const maxChars = Math.max(0, tokens) * CHARS_PER_TOKEN;
+  return text.length <= maxChars
+    ? text
+    : `${text.slice(0, maxChars).trimEnd()}…`;
+}

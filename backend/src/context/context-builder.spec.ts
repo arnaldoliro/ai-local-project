@@ -1,4 +1,5 @@
 import {
+  composeSystemPrompt,
   ContextBuilder,
   ContextOverflowError,
   type ContextLimits,
@@ -170,6 +171,58 @@ describe('ContextBuilder', () => {
     expect(normal.includedHistory).toBe(6);
     expect(thinking.includedHistory).toBe(5);
     expect(thinking.estimatedPromptTokens).toBeLessThanOrEqual(1638);
+  });
+
+  it('puts the summary inside the single system message', () => {
+    const plan = new ContextBuilder(limits).build({
+      systemPrompt: 'be nice',
+      history: turns(2),
+      userMessage: 'hi',
+      summary: 'user likes TypeScript',
+    });
+
+    expect(plan.summaryUsed).toBe(true);
+    expect(plan.messages.filter((m) => m.role === 'system')).toHaveLength(1);
+    expect(plan.messages[0].content).toBe(
+      composeSystemPrompt('be nice', 'user likes TypeScript'),
+    );
+    expect(plan.messages[0].content).toContain('user likes TypeScript');
+    expect(plan.includedHistory).toBe(2);
+  });
+
+  it('counts the summary against the budget, leaving less room for history', () => {
+    const history = turns(6, sized(300).slice(0, -3));
+    const builder = new ContextBuilder(limits);
+
+    const without = builder.build({
+      systemPrompt: '',
+      history,
+      userMessage: 'hi',
+    });
+    const withSummary = builder.build({
+      systemPrompt: '',
+      history,
+      userMessage: 'hi',
+      summary: sized(1000),
+    });
+
+    expect(without.includedHistory).toBe(6);
+    expect(withSummary.includedHistory).toBeLessThan(6);
+    expect(withSummary.estimatedPromptTokens).toBeLessThanOrEqual(
+      withSummary.inputBudget,
+    );
+  });
+
+  it('drops the summary rather than rejecting a big message', () => {
+    const plan = new ContextBuilder(limits).build({
+      systemPrompt: '',
+      history: [],
+      userMessage: sized(2000),
+      summary: sized(1000),
+    });
+
+    expect(plan.summaryUsed).toBe(false);
+    expect(plan.messages).toHaveLength(1);
   });
 
   it('rejects a message that cannot fit even alone', () => {

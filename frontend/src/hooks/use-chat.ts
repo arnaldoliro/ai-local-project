@@ -4,8 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ApiError,
   createConversation,
-  fetchCurrentConversation,
+  fetchConversation,
   postMessage,
+  type Conversation,
   type Message,
 } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
@@ -21,14 +22,21 @@ export type ChatPhase =
   | { kind: "loading_model" }
   | { kind: "generating" };
 
-type LoadState = "loading" | "ready" | "error";
+type LoadState = "loading" | "ready" | "not_found" | "error";
 
 const GENERATING: ChatPhase = { kind: "generating" };
 
-export function useChat() {
+/**
+ * State of one chat view. `initialConversationId` is null for a new chat:
+ * the conversation is created on the first send and reported via `onCreated`.
+ */
+export function useChat(initialConversationId: string | null, onCreated: (conversation: Conversation) => void) {
+  // Frozen at mount: when the first send creates the conversation, the prop
+  // changes, but reloading from the server mid-stream would wipe the answer.
+  const [startId] = useState(initialConversationId);
   const [messages, setMessages] = useState<UiMessage[]>([]);
-  const [conversationId, setConversationId] = useState<string | null>(null);
-  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [conversationId, setConversationId] = useState(startId);
+  const [loadState, setLoadState] = useState<LoadState>(startId ? "loading" : "ready");
   const [phase, setPhase] = useState<ChatPhase>({ kind: "idle" });
   const [sendError, setSendError] = useState<string | null>(null);
 
@@ -40,19 +48,23 @@ export function useChat() {
   const frameRef = useRef<number | null>(null);
 
   useEffect(() => {
+    if (!startId) return;
     const controller = new AbortController();
-    fetchCurrentConversation(controller.signal).then(
-      ({ conversation }) => {
-        setConversationId(conversation?.id ?? null);
-        setMessages(conversation?.messages ?? []);
+    fetchConversation(startId, controller.signal).then(
+      (conversation) => {
+        setMessages(conversation.messages);
         setLoadState("ready");
       },
-      () => {
-        if (!controller.signal.aborted) setLoadState("error");
+      (error: unknown) => {
+        if (controller.signal.aborted) return;
+        setLoadState(error instanceof ApiError && error.status === 404 ? "not_found" : "error");
       },
     );
     return () => controller.abort();
-  }, []);
+  }, [startId]);
+
+  // Leaving the view (another conversation, new chat) stops a running answer.
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const patchMessage = useCallback((id: string | null, patch: (m: UiMessage) => UiMessage) => {
     if (!id) return;
@@ -109,8 +121,10 @@ export function useChat() {
       try {
         let id = conversationId;
         if (!id) {
-          id = (await createConversation()).id;
+          const conversation = await createConversation();
+          id = conversation.id;
           setConversationId(id);
+          onCreated(conversation);
         }
 
         const response = await postMessage(id, { content, think }, controller.signal);
@@ -174,13 +188,14 @@ export function useChat() {
         setPhase({ kind: "idle" });
       }
     },
-    [conversationId, flush, patchMessage],
+    [conversationId, flush, onCreated, patchMessage],
   );
 
   /** Closing the request makes the backend abort the model call. */
   const stop = useCallback(() => abortRef.current?.abort(), []);
 
   return {
+    conversationId,
     messages,
     loadState,
     phase,

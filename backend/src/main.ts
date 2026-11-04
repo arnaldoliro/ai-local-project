@@ -4,7 +4,11 @@ import { AppModule } from './app.module.js';
 import { EnvironmentVariables } from './config/env.validation.js';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    // Long-lived SSE connections (GET /events, chat streams) would otherwise
+    // make a graceful shutdown wait for the browser to disconnect.
+    forceCloseConnections: true,
+  });
   const env = app.get(EnvironmentVariables);
 
   // Only the frontend origin may call the API from a browser.

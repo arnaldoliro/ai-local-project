@@ -29,6 +29,8 @@ export class LlmService implements OnModuleDestroy {
   private readonly logger = new Logger(LlmService.name);
   private readonly queue: LlmQueue;
   private readonly shutdown = new AbortController();
+  /** The call currently on the model, so a chat can preempt background work. */
+  private running: { priority: LlmPriority; preempt: () => void } | null = null;
 
   constructor(
     private readonly client: LlmClient,
@@ -43,11 +45,37 @@ export class LlmService implements OnModuleDestroy {
   }
 
   chat(request: ChatRequest, options: ChatCallOptions): Promise<ChatResult> {
+    // A user waiting for an answer beats a title or a summary: interrupt the
+    // background call instead of queueing behind it. It is retried after the
+    // next exchange, so nothing is lost.
+    if (
+      options.priority === LlmPriority.Chat &&
+      this.running &&
+      this.running.priority !== LlmPriority.Chat
+    ) {
+      this.running.preempt();
+    }
+
     return this.queue.run(() => this.execute(request, options), {
       priority: options.priority,
       signal: options.signal,
       onPosition: options.onQueued,
     });
+  }
+
+  /** Non-streaming convenience for background work: returns the whole text. */
+  async complete(
+    request: ChatRequest,
+    options: Omit<ChatCallOptions, 'onChunk'>,
+  ): Promise<{ content: string; result: ChatResult }> {
+    let content = '';
+    const result = await this.chat(request, {
+      ...options,
+      onChunk: (chunk) => {
+        if (chunk.type === 'content') content += chunk.text;
+      },
+    });
+    return { content, result };
   }
 
   onModuleDestroy(): void {
@@ -78,6 +106,10 @@ export class LlmService implements OnModuleDestroy {
     options.signal?.addEventListener('abort', onCallerAbort, { once: true });
     this.shutdown.signal.addEventListener('abort', onShutdown, { once: true });
     if (options.signal?.aborted) onCallerAbort();
+    this.running = {
+      priority: options.priority,
+      preempt: () => abort('preempted', 'Interrupted by a chat request'),
+    };
 
     try {
       const modelLoaded = await this.client
@@ -107,6 +139,7 @@ export class LlmService implements OnModuleDestroy {
       this.logger.error(error);
       throw new LlmError('unavailable', (error as Error).message);
     } finally {
+      this.running = null;
       clearTimeout(firstChunkTimer);
       clearTimeout(totalTimer);
       options.signal?.removeEventListener('abort', onCallerAbort);

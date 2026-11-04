@@ -32,6 +32,8 @@ export interface BuildContextInput {
    * room for history in that request. The window itself never changes.
    */
   maxOutputTokens?: number;
+  /** Summary of the messages older than `history` (Phase 2). */
+  summary?: string | null;
 }
 
 export interface ContextPlan {
@@ -41,6 +43,22 @@ export interface ContextPlan {
   inputBudget: number;
   includedHistory: number;
   droppedHistory: number;
+  summaryUsed: boolean;
+}
+
+/**
+ * The summary rides inside the system message instead of being a second
+ * system message: chat templates like Qwen's only expect one, at the top.
+ */
+export function composeSystemPrompt(
+  systemPrompt: string,
+  summary?: string | null,
+): string {
+  if (!summary) return systemPrompt;
+  const section =
+    'Resumo da conversa até aqui (mensagens anteriores que não aparecem abaixo):\n' +
+    summary;
+  return systemPrompt ? `${systemPrompt}\n\n${section}` : section;
 }
 
 export class ContextOverflowError extends Error {
@@ -63,11 +81,13 @@ export class ContextOverflowError extends Error {
  * The input budget is filled in priority order:
  *   1. system prompt            (mandatory)
  *   2. current user message     (mandatory; if 1+2 don't fit -> error)
- *   3. previous messages, newest first, until the budget or the cap runs out
+ *   3. summary of old messages  (inside the system message; dropped first
+ *                                if 1+2+3 don't fit)
+ *   4. previous messages, newest first, until the budget or the cap runs out
  *
  * History is kept contiguous: once a message doesn't fit, everything older
  * is dropped too, so the model never sees a conversation with holes.
- * Phase 2 adds a summary of the dropped messages; Phase 5 adds RAG snippets.
+ * Phase 5 adds RAG snippets.
  *
  * Pure class (no I/O, no Nest): trivially unit-testable.
  */
@@ -98,11 +118,23 @@ export class ContextBuilder {
     history,
     userMessage,
     maxOutputTokens = this.limits.maxOutputTokens,
+    summary,
   }: BuildContextInput): ContextPlan {
     const budget = this.inputBudgetFor(maxOutputTokens);
-    const systemCost = systemPrompt ? estimateMessageTokens(systemPrompt) : 0;
-    const mandatory =
-      systemCost + estimateMessageTokens(userMessage) + PROMPT_OVERHEAD_TOKENS;
+    const userCost =
+      estimateMessageTokens(userMessage) + PROMPT_OVERHEAD_TOKENS;
+    const systemCost = (text: string) =>
+      text ? estimateMessageTokens(text) : 0;
+
+    // Try with the summary; without it if the message is too big for both.
+    let system = composeSystemPrompt(systemPrompt, summary);
+    let summaryUsed = Boolean(summary);
+    let mandatory = systemCost(system) + userCost;
+    if (summaryUsed && mandatory > budget) {
+      system = systemPrompt;
+      summaryUsed = false;
+      mandatory = systemCost(system) + userCost;
+    }
 
     if (mandatory > budget) {
       throw new ContextOverflowError(mandatory, Math.max(0, budget));
@@ -121,9 +153,7 @@ export class ContextBuilder {
     }
 
     const messages: ChatMessage[] = [
-      ...(systemPrompt
-        ? [{ role: 'system' as const, content: systemPrompt }]
-        : []),
+      ...(system ? [{ role: 'system' as const, content: system }] : []),
       ...selected,
       { role: 'user', content: userMessage },
     ];
@@ -134,6 +164,7 @@ export class ContextBuilder {
       inputBudget: budget,
       includedHistory: selected.length,
       droppedHistory: history.length - selected.length,
+      summaryUsed,
     };
   }
 }

@@ -88,11 +88,26 @@ docker compose exec backend npx prisma migrate dev --name descricao_da_mudanca
 | Método | Rota | O que faz |
 |---|---|---|
 | `GET` | `/health` | Status do banco e do Ollama (não carrega modelo) |
+| `GET` | `/conversations` | Lista as conversas (mais recentes primeiro) |
 | `POST` | `/conversations` | Cria uma conversa |
-| `GET` | `/conversations/current` | Conversa mais recente com as mensagens |
+| `GET` | `/conversations/:id` | Conversa com as mensagens |
+| `PATCH` | `/conversations/:id` | Renomeia: `{ title }` |
+| `DELETE` | `/conversations/:id` | Apaga a conversa e as mensagens |
 | `POST` | `/conversations/:id/messages` | Envia `{ content, think? }` e responde em **SSE** |
+| `GET` | `/events` | **SSE** com as mudanças nas conversas (`conversation.updated` / `conversation.deleted`) |
 
 Eventos do stream, em ordem: `start` → `queued` (se houver fila) → `generating` (`modelLoaded: false` = carregando o modelo) → `thinking`* / `content`* → `done` ou `error`. Fechar a conexão cancela a geração no Ollama.
+
+## Título e resumo automáticos
+
+Depois de cada resposta, duas tarefas rodam **em segundo plano**, uma depois da outra e pela mesma fila do modelo, com prioridade menor que o chat:
+
+1. **Título:** na primeira troca de mensagens, o modelo gera um título curto. Se você renomear antes, o seu título prevalece.
+2. **Resumo:** quando o histórico ainda não resumido passa de cerca de 1.600 tokens (ou de 20 mensagens), as mensagens antigas são resumidas. O histórico recente, de cerca de 800 tokens, continua indo inteiro. O resumo é incremental: o resumo anterior mais as mensagens novas viram um resumo novo.
+
+Se você mandar uma mensagem enquanto uma dessas tarefas estiver rodando, ela é **interrompida** e volta para a fila. O seu chat nunca espera por título ou resumo.
+
+O título aparece sozinho na lista lateral, via `GET /events`.
 
 ## Como o contexto é montado
 
@@ -100,7 +115,8 @@ A janela tem 4096 tokens: 1024 ficam reservados para a resposta e 10% são marge
 
 1. System prompt
 2. Mensagem atual (se não couber sozinha, a API responde `413`)
-3. Mensagens anteriores, da mais nova para a mais antiga, até acabar o orçamento (no máximo 20)
+3. Resumo das mensagens antigas, dentro do system prompt (é o primeiro a sair se a mensagem atual for muito grande)
+4. Mensagens anteriores ainda não resumidas, da mais nova para a mais antiga, até acabar o orçamento (no máximo 20)
 
 Com o **raciocínio ligado**, a reserva de resposta sobe para 2048 tokens, porque o raciocínio também conta como saída. Nessa mensagem sobram cerca de 1.638 tokens para o prompt. A janela continua em 4096.
 
@@ -126,7 +142,7 @@ Os tokens são estimados antes do envio (cerca de 3 caracteres por token, de pro
 
 - [x] **Fase 0:** fundação (compose, esqueletos, config validada, Prisma + pgvector)
 - [x] **Fase 1:** chat com streaming, fila do modelo, gestão de contexto
-- [ ] **Fase 2:** várias conversas, título automático, resumo das antigas
+- [x] **Fase 2:** várias conversas, título automático, resumo das antigas
 - [ ] **Fase 3:** modelo, system prompt e temperatura por conversa
 - [ ] **Fase 4:** imagens
 - [ ] **Fase 5:** memória com embeddings e RAG
