@@ -20,14 +20,13 @@ import { LlmError } from '../llm/llm.errors.js';
 import { LlmService } from '../llm/llm.service.js';
 import { LlmPriority, type ChatRequest } from '../llm/llm.types.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import {
+  DEFAULT_SYSTEM_PROMPT,
+  resolveChatSettings,
+  type SettingsDefaults,
+} from './chat-settings.js';
 import type { SendMessageDto } from './send-message.dto.js';
 import type { SseStream } from './sse-stream.js';
-
-/** Kept short on purpose: every token here is taken from the history budget. */
-const DEFAULT_SYSTEM_PROMPT =
-  'Você é um assistente prestativo rodando localmente. Responda em português ' +
-  'do Brasil, de forma clara e direta. Use markdown quando ajudar: listas, ' +
-  'tabelas e blocos de código com a linguagem indicada.';
 
 export interface PreparedChat {
   conversationId: string;
@@ -77,17 +76,21 @@ export class ChatService implements OnApplicationBootstrap {
       });
     }
 
-    const think = dto.think ?? false;
-    // Reasoning tokens count as output, so thinking gets a bigger reserve
-    // (and, in exchange, less history in this one request).
-    const maxOutputTokens = think
-      ? this.env.LLM_MAX_OUTPUT_TOKENS_THINKING
-      : this.env.LLM_MAX_OUTPUT_TOKENS;
+    // Conversation settings (null = default) + this message's thinking
+    // toggle. Thinking gets a bigger output reserve, so less history.
+    const model = conversation.model ?? this.env.LLM_DEFAULT_MODEL;
+    const settings = resolveChatSettings(
+      conversation,
+      this.defaults(),
+      dto.think ?? false,
+      (await this.llm.findModel(model))?.capabilities ?? null,
+    );
     // Messages already folded into the summary are not sent again as history.
     const plan = this.buildPlan(
       await this.loadHistory(conversationId, conversation.summarizedUntil),
       dto,
-      maxOutputTokens,
+      settings.systemPrompt,
+      settings.maxOutputTokens,
       conversation.summary,
     );
 
@@ -120,11 +123,21 @@ export class ChatService implements OnApplicationBootstrap {
       userMessage,
       assistantMessage,
       request: {
-        model: this.env.LLM_DEFAULT_MODEL,
+        model: settings.model,
         messages: plan.messages,
-        think,
-        maxOutputTokens,
+        think: settings.think,
+        maxOutputTokens: settings.maxOutputTokens,
+        temperature: settings.temperature,
       },
+    };
+  }
+
+  defaults(): SettingsDefaults {
+    return {
+      model: this.env.LLM_DEFAULT_MODEL,
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      maxOutputTokens: this.env.LLM_MAX_OUTPUT_TOKENS,
+      maxOutputTokensThinking: this.env.LLM_MAX_OUTPUT_TOKENS_THINKING,
     };
   }
 
@@ -245,12 +258,13 @@ export class ChatService implements OnApplicationBootstrap {
   private buildPlan(
     history: { role: 'user' | 'assistant'; content: string }[],
     dto: SendMessageDto,
+    systemPrompt: string,
     maxOutputTokens: number,
     summary: string | null,
   ): ContextPlan {
     try {
       return this.context.build({
-        systemPrompt: DEFAULT_SYSTEM_PROMPT,
+        systemPrompt,
         history,
         userMessage: dto.content,
         maxOutputTokens,

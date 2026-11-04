@@ -5,10 +5,11 @@ import { ConversationsModule } from '../conversations/conversations.module.js';
 import { LlmModule } from '../llm/llm.module.js';
 import { ChatController } from './chat.controller.js';
 import { ChatService } from './chat.service.js';
+import { SettingsController } from './settings.controller.js';
 
 @Module({
   imports: [ConversationsModule, ContextModule, LlmModule, BackgroundModule],
-  controllers: [ChatController],
+  controllers: [ChatController, SettingsController],
   providers: [ChatService],
 })
 export class ChatModule {}

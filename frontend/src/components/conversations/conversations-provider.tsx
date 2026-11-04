@@ -5,8 +5,9 @@ import {
   deleteConversation,
   EVENTS_URL,
   listConversations,
-  renameConversation,
+  updateConversation,
   type Conversation,
+  type ConversationSettings,
   type ConversationEvent,
 } from "@/lib/api";
 
@@ -15,7 +16,8 @@ type ConversationsContext = {
   loaded: boolean;
   /** Adds or replaces a conversation, keeping the list newest first. */
   upsert: (conversation: Conversation) => void;
-  rename: (id: string, title: string) => Promise<void>;
+  /** Rename and/or change settings; throws ApiError when the server refuses. */
+  update: (id: string, patch: Partial<ConversationSettings> & { title?: string }) => Promise<void>;
   remove: (id: string) => Promise<void>;
 };
 
@@ -75,8 +77,9 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
     };
   }, [upsert, drop]);
 
-  const rename = useCallback(
-    async (id: string, title: string) => upsert(await renameConversation(id, title)),
+  const update = useCallback(
+    async (id: string, patch: Partial<ConversationSettings> & { title?: string }) =>
+      upsert(await updateConversation(id, patch)),
     [upsert],
   );
 
@@ -89,8 +92,8 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ conversations, loaded, upsert, rename, remove }),
-    [conversations, loaded, upsert, rename, remove],
+    () => ({ conversations, loaded, upsert, update, remove }),
+    [conversations, loaded, upsert, update, remove],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

@@ -3,6 +3,7 @@ import { EnvironmentVariables } from '../config/env.validation.js';
 import { CONTEXT_MESSAGE_FILTER } from '../conversations/context-messages.js';
 import { ConversationsService } from '../conversations/conversations.service.js';
 import { LlmService } from '../llm/llm.service.js';
+import { noThinking } from '../chat/chat-settings.js';
 import { LlmPriority } from '../llm/llm.types.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
@@ -59,7 +60,7 @@ export class SummaryService {
 
       const conversation = await this.prisma.conversation.findUnique({
         where: { id: conversationId },
-        select: { summary: true, summarizedUntil: true },
+        select: { summary: true, summarizedUntil: true, model: true },
       });
       if (!conversation) return;
 
@@ -71,9 +72,12 @@ export class SummaryService {
       if (toSummarize.length === 0) return;
 
       const chunk = takeSummaryChunk(toSummarize, this.policy);
+      // Same model as the conversation, to avoid a model swap in VRAM.
+      const model = conversation.model ?? this.env.LLM_DEFAULT_MODEL;
+      const capabilities = (await this.llm.findModel(model))?.capabilities;
       const { content } = await this.llm.complete(
         {
-          model: this.env.LLM_DEFAULT_MODEL,
+          model,
           messages: [
             { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
             {
@@ -81,7 +85,7 @@ export class SummaryService {
               content: buildSummaryPrompt(conversation.summary, chunk),
             },
           ],
-          think: false,
+          think: noThinking(capabilities ?? null),
           maxOutputTokens: SUMMARY_MAX_OUTPUT_TOKENS,
           temperature: 0.2,
         },

@@ -49,6 +49,9 @@ class FakeClient extends LlmClient {
   isModelLoaded() {
     return Promise.resolve(true);
   }
+  listModels() {
+    return Promise.resolve([]);
+  }
 }
 
 describe('LlmService', () => {
@@ -136,6 +139,9 @@ describe('LlmService', () => {
       }
       isModelLoaded() {
         return Promise.resolve(true);
+      }
+      listModels() {
+        return Promise.resolve([]);
       }
     }
     const started = () => new Promise((resolve) => setTimeout(resolve, 10));

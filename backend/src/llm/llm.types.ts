@@ -8,8 +8,12 @@ export interface ChatMessage {
 export interface ChatRequest {
   model: string;
   messages: ChatMessage[];
-  /** Model reasoning. Off by default; the user can enable it per message. */
-  think: boolean;
+  /**
+   * Model reasoning. Off by default; the user can enable it per message.
+   * Left undefined for models without the `thinking` capability, so the
+   * parameter is not sent at all.
+   */
+  think?: boolean;
   /** Upper bound for the answer, thinking included. */
   maxOutputTokens: number;
   temperature?: number;
@@ -29,6 +33,24 @@ export type ChatChunk =
     };
 
 export type ChatResult = Omit<Extract<ChatChunk, { type: 'done' }>, 'type'>;
+
+export interface ModelCapabilities {
+  completion: boolean;
+  vision: boolean;
+  tools: boolean;
+  thinking: boolean;
+  embedding: boolean;
+}
+
+/** A locally installed model, as the UI needs it. */
+export interface ModelInfo {
+  name: string;
+  family: string | null;
+  parameterSize: string | null;
+  quantization: string | null;
+  sizeBytes: number;
+  capabilities: ModelCapabilities;
+}
 
 /**
  * Lower number = served first. User-facing chat always jumps ahead of

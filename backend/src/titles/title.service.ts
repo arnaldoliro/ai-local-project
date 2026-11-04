@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { EnvironmentVariables } from '../config/env.validation.js';
 import { ConversationsService } from '../conversations/conversations.service.js';
 import { LlmService } from '../llm/llm.service.js';
+import { noThinking } from '../chat/chat-settings.js';
 import { LlmPriority } from '../llm/llm.types.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
@@ -29,7 +30,7 @@ export class TitleService {
   ): Promise<void> {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { title: true },
+      select: { title: true, model: true },
     });
     if (!conversation || conversation.title) return;
 
@@ -43,9 +44,14 @@ export class TitleService {
     });
     if (!firstUser || !firstAnswer) return;
 
+    // Same model as the conversation: a different one would force Ollama to
+    // swap models in VRAM (only one fits) right after every answer.
+    const model = conversation.model ?? this.env.LLM_DEFAULT_MODEL;
+    const capabilities = (await this.llm.findModel(model))?.capabilities;
+
     const { content } = await this.llm.complete(
       {
-        model: this.env.LLM_DEFAULT_MODEL,
+        model,
         messages: [
           { role: 'system', content: TITLE_SYSTEM_PROMPT },
           {
@@ -53,7 +59,7 @@ export class TitleService {
             content: buildTitlePrompt(firstUser.content, firstAnswer.content),
           },
         ],
-        think: false,
+        think: noThinking(capabilities ?? null),
         maxOutputTokens: TITLE_MAX_OUTPUT_TOKENS,
         temperature: 0.3,
       },

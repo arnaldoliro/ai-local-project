@@ -26,7 +26,14 @@ export type Message = {
   createdAt: string;
 };
 
-export type Conversation = {
+/** null = use the default (see fetchSettingsDefaults). */
+export type ConversationSettings = {
+  model: string | null;
+  systemPrompt: string | null;
+  temperature: number | null;
+};
+
+export type Conversation = ConversationSettings & {
   id: string;
   title: string | null;
   createdAt: string;
@@ -70,15 +77,45 @@ export const listConversations = (signal?: AbortSignal) =>
 export const fetchConversation = (id: string, signal?: AbortSignal) =>
   request<ConversationWithMessages>(`/conversations/${id}`, { signal });
 
-export const createConversation = () =>
-  request<Conversation>("/conversations", { method: "POST" });
+export const createConversation = (settings?: Partial<ConversationSettings>) =>
+  request<Conversation>("/conversations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings ?? {}),
+  });
 
-export const renameConversation = (id: string, title: string) =>
+/** Rename and/or change settings (undefined = unchanged, null = default). */
+export const updateConversation = (
+  id: string,
+  patch: Partial<ConversationSettings> & { title?: string },
+) =>
   request<Conversation>(`/conversations/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title }),
+    body: JSON.stringify(patch),
   });
+
+export type ModelInfo = {
+  name: string;
+  family: string | null;
+  parameterSize: string | null;
+  quantization: string | null;
+  sizeBytes: number;
+  capabilities: { completion: boolean; vision: boolean; tools: boolean; thinking: boolean; embedding: boolean };
+};
+
+export const fetchModels = (signal?: AbortSignal) =>
+  request<{ defaultModel: string; models: ModelInfo[] }>("/models", { signal });
+
+export type SettingsDefaults = {
+  model: string;
+  systemPrompt: string;
+  systemPromptMaxLength: number;
+  temperature: { min: number; max: number };
+};
+
+export const fetchSettingsDefaults = (signal?: AbortSignal) =>
+  request<SettingsDefaults>("/settings/defaults", { signal });
 
 export async function deleteConversation(id: string): Promise<void> {
   const response = await fetch(`${API_URL}/conversations/${id}`, { method: "DELETE" });

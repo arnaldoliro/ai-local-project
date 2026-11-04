@@ -13,13 +13,16 @@ type Props = {
   onStop: () => void;
   think: boolean;
   onThinkChange: (think: boolean) => void;
+  /** False when the conversation's model has no thinking capability. */
+  thinkSupported: boolean;
   streaming: boolean;
   error: string | null;
   onDismissError: () => void;
 };
 
 export function Composer(props: Props) {
-  const { value, onChange, onSubmit, onStop, think, onThinkChange, streaming, error, onDismissError } = props;
+  const { value, onChange, onSubmit, onStop, think, onThinkChange, thinkSupported, streaming, error, onDismissError } =
+    props;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const canSend = value.trim().length > 0 && !streaming;
 
@@ -75,14 +78,19 @@ export function Composer(props: Props) {
           <motion.button
             type="button"
             onClick={() => onThinkChange(!think)}
-            aria-pressed={think}
-            whileTap={{ scale: 0.95 }}
-            title="Liga o raciocínio do modelo só para a próxima mensagem (respostas mais lentas)"
-            className={`relative flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition-colors ${
+            aria-pressed={think && thinkSupported}
+            disabled={!thinkSupported}
+            whileTap={thinkSupported ? { scale: 0.95 } : undefined}
+            title={
+              thinkSupported
+                ? "Liga o raciocínio do modelo só para a próxima mensagem (respostas mais lentas)"
+                : "O modelo desta conversa não tem raciocínio"
+            }
+            className={`relative flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
               think ? "text-foreground" : "text-muted hover:text-foreground"
             }`}
           >
-            {think && (
+            {think && thinkSupported && (
               <motion.span
                 layoutId="think-pill"
                 className="absolute inset-0 rounded-full border border-accent/40 bg-accent/15"

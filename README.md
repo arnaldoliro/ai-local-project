@@ -91,12 +91,23 @@ docker compose exec backend npx prisma migrate dev --name descricao_da_mudanca
 | `GET` | `/conversations` | Lista as conversas (mais recentes primeiro) |
 | `POST` | `/conversations` | Cria uma conversa |
 | `GET` | `/conversations/:id` | Conversa com as mensagens |
-| `PATCH` | `/conversations/:id` | Renomeia: `{ title }` |
+| `PATCH` | `/conversations/:id` | Renomeia e/ou muda a configuração: `{ title?, model?, systemPrompt?, temperature? }` (`null` volta ao padrão) |
 | `DELETE` | `/conversations/:id` | Apaga a conversa e as mensagens |
 | `POST` | `/conversations/:id/messages` | Envia `{ content, think? }` e responde em **SSE** |
+| `GET` | `/models` | Modelos instalados no Ollama que conversam, com capacidades (raciocínio, imagens, ferramentas) |
+| `GET` | `/settings/defaults` | Modelo e system prompt padrão, limites de tamanho e de temperatura |
 | `GET` | `/events` | **SSE** com as mudanças nas conversas (`conversation.updated` / `conversation.deleted`) |
 
 Eventos do stream, em ordem: `start` → `queued` (se houver fila) → `generating` (`modelLoaded: false` = carregando o modelo) → `thinking`* / `content`* → `done` ou `error`. Fechar a conexão cancela a geração no Ollama.
+
+## Configuração por conversa
+
+Cada conversa pode ter o próprio **modelo**, **system prompt** e **temperatura**, ajustados no painel aberto pelo botão do modelo no topo do chat. Campo vazio significa "usar o padrão": o modelo do `.env`, o system prompt padrão e a temperatura definida no próprio modelo.
+
+- **Trocar de modelo:** só um modelo cabe na GPU por vez, então a primeira resposta com o modelo novo demora mais (carregamento). Título e resumo usam o modelo da conversa, para não forçar trocas.
+- **Raciocínio:** o botão só fica disponível se o modelo tiver a capacidade `thinking`.
+- **System prompt:** até 2.000 caracteres. Ele sai do mesmo orçamento de 4096 tokens do histórico.
+- **Mais modelos:** `docker compose exec ollama ollama pull <modelo>`. A lista no painel se atualiza ao abrir.
 
 ## Título e resumo automáticos
 
@@ -143,6 +154,6 @@ Os tokens são estimados antes do envio (cerca de 3 caracteres por token, de pro
 - [x] **Fase 0:** fundação (compose, esqueletos, config validada, Prisma + pgvector)
 - [x] **Fase 1:** chat com streaming, fila do modelo, gestão de contexto
 - [x] **Fase 2:** várias conversas, título automático, resumo das antigas
-- [ ] **Fase 3:** modelo, system prompt e temperatura por conversa
+- [x] **Fase 3:** modelo, system prompt e temperatura por conversa
 - [ ] **Fase 4:** imagens
 - [ ] **Fase 5:** memória com embeddings e RAG

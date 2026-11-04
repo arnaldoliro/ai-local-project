@@ -7,6 +7,7 @@ import {
   fetchConversation,
   postMessage,
   type Conversation,
+  type ConversationSettings,
   type Message,
 } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
@@ -95,7 +96,7 @@ export function useChat(initialConversationId: string | null, onCreated: (conver
    * Resolves `false` when nothing was saved (the caller restores the draft).
    */
   const send = useCallback(
-    async (content: string, think: boolean): Promise<boolean> => {
+    async (content: string, think: boolean, newChatSettings?: ConversationSettings): Promise<boolean> => {
       if (abortRef.current) return false;
 
       const controller = new AbortController();
@@ -121,7 +122,7 @@ export function useChat(initialConversationId: string | null, onCreated: (conver
       try {
         let id = conversationId;
         if (!id) {
-          const conversation = await createConversation();
+          const conversation = await createConversation(newChatSettings);
           id = conversation.id;
           setConversationId(id);
           onCreated(conversation);

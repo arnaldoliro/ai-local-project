@@ -1,5 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type { Conversation } from '../generated/prisma/client.js';
+import { LlmService } from '../llm/llm.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
   toConversationDto,
@@ -8,6 +13,10 @@ import {
   type ConversationWithMessagesDto,
 } from './conversation.dto.js';
 import { ConversationEventsService } from './conversation-events.service.js';
+import type {
+  ConversationSettingsDto,
+  UpdateConversationDto,
+} from './conversation-settings.dto.js';
 
 /** Plenty for a single local user; avoids an unbounded query. */
 const LIST_LIMIT = 200;
@@ -17,6 +26,7 @@ export class ConversationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: ConversationEventsService,
+    private readonly llm: LlmService,
   ) {}
 
   async list(): Promise<ConversationDto[]> {
@@ -27,9 +37,10 @@ export class ConversationsService {
     return conversations.map(toConversationDto);
   }
 
-  async create(): Promise<ConversationDto> {
+  async create(settings: ConversationSettingsDto): Promise<ConversationDto> {
+    const data = await this.settingsData(settings);
     const dto = toConversationDto(
-      await this.prisma.conversation.create({ data: {} }),
+      await this.prisma.conversation.create({ data }),
     );
     this.events.emit({ type: 'conversation.updated', conversation: dto });
     return dto;
@@ -56,9 +67,15 @@ export class ConversationsService {
     return conversation;
   }
 
-  async rename(id: string, title: string): Promise<ConversationDto> {
+  async update(
+    id: string,
+    dto: UpdateConversationDto,
+  ): Promise<ConversationDto> {
     await this.getOrThrow(id);
-    return this.updateAndEmit(id, { title });
+    return this.updateAndEmit(id, {
+      ...(typeof dto.title === 'string' && { title: dto.title }),
+      ...(await this.settingsData(dto)),
+    });
   }
 
   /** Messages go with it (ON DELETE CASCADE). */
@@ -103,9 +120,42 @@ export class ConversationsService {
     return count > 0;
   }
 
+  /**
+   * Only the fields present in the DTO (undefined = unchanged). An empty
+   * system prompt is stored as null, i.e. "use the default".
+   */
+  private async settingsData(settings: ConversationSettingsDto) {
+    const { model, systemPrompt, temperature } = settings;
+    if (model) await this.assertChatModel(model);
+
+    return {
+      ...(model !== undefined && { model }),
+      ...(systemPrompt !== undefined && {
+        systemPrompt: systemPrompt?.trim() || null,
+      }),
+      ...(temperature !== undefined && { temperature }),
+    };
+  }
+
+  private async assertChatModel(model: string): Promise<void> {
+    const info = await this.llm.findModel(model);
+    if (!info?.capabilities.completion) {
+      throw new BadRequestException({
+        code: 'unknown_model',
+        message: `Model "${model}" is not installed or cannot chat`,
+      });
+    }
+  }
+
   private async updateAndEmit(
     id: string,
-    data: { title?: string; updatedAt?: Date },
+    data: {
+      title?: string;
+      updatedAt?: Date;
+      model?: string | null;
+      systemPrompt?: string | null;
+      temperature?: number | null;
+    },
   ): Promise<ConversationDto> {
     const dto = toConversationDto(
       await this.prisma.conversation.update({ where: { id }, data }),
