@@ -4,6 +4,7 @@ import { motion } from "motion/react";
 import { SparkIcon } from "@/components/icons";
 import type { ChatPhase, UiMessage } from "@/hooks/use-chat";
 import { errorMessage } from "@/lib/errors";
+import { ImageGallery } from "./image-gallery";
 import { Markdown } from "./markdown";
 import { StreamStatus } from "./stream-status";
 import { ThinkingBlock } from "./thinking-block";
@@ -17,10 +18,17 @@ const enter = {
 export function MessageItem({ message, phase }: { message: UiMessage; phase: ChatPhase }) {
   if (message.role === "user") {
     return (
-      <motion.div {...enter} className="flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md border border-accent/20 bg-accent/12 px-4 py-2.5 text-[0.95rem] leading-relaxed">
-          {message.content}
-        </div>
+      <motion.div {...enter} className="flex flex-col items-end gap-2">
+        {message.attachments.length > 0 && (
+          <div className="w-full max-w-[min(85%,26rem)]">
+            <ImageGallery images={message.attachments} />
+          </div>
+        )}
+        {message.content && (
+          <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md border border-accent/20 bg-accent/12 px-4 py-2.5 text-[0.95rem] leading-relaxed">
+            {message.content}
+          </div>
+        )}
       </motion.div>
     );
   }

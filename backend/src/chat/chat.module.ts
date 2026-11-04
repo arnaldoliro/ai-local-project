@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AttachmentsModule } from '../attachments/attachments.module.js';
 import { BackgroundModule } from '../background/background.module.js';
 import { ContextModule } from '../context/context.module.js';
 import { ConversationsModule } from '../conversations/conversations.module.js';
@@ -8,7 +9,13 @@ import { ChatService } from './chat.service.js';
 import { SettingsController } from './settings.controller.js';
 
 @Module({
-  imports: [ConversationsModule, ContextModule, LlmModule, BackgroundModule],
+  imports: [
+    ConversationsModule,
+    ContextModule,
+    LlmModule,
+    BackgroundModule,
+    AttachmentsModule,
+  ],
   controllers: [ChatController, SettingsController],
   providers: [ChatService],
 })

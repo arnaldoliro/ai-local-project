@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EnvironmentVariables } from '../config/env.validation.js';
 import { ConversationsService } from '../conversations/conversations.service.js';
+import { withImagePlaceholder } from '../context/context-builder.js';
 import { LlmService } from '../llm/llm.service.js';
 import { noThinking } from '../chat/chat-settings.js';
 import { LlmPriority } from '../llm/llm.types.js';
@@ -37,6 +38,7 @@ export class TitleService {
     const firstUser = await this.prisma.message.findFirst({
       where: { conversationId, role: 'user' },
       orderBy: { createdAt: 'asc' },
+      include: { _count: { select: { attachments: true } } },
     });
     const firstAnswer = await this.prisma.message.findFirst({
       where: { conversationId, role: 'assistant', status: 'complete' },
@@ -56,7 +58,15 @@ export class TitleService {
           { role: 'system', content: TITLE_SYSTEM_PROMPT },
           {
             role: 'user',
-            content: buildTitlePrompt(firstUser.content, firstAnswer.content),
+            content: buildTitlePrompt(
+              firstUser._count.attachments
+                ? withImagePlaceholder(
+                    firstUser.content,
+                    firstUser._count.attachments,
+                  )
+                : firstUser.content,
+              firstAnswer.content,
+            ),
           },
         ],
         think: noThinking(capabilities ?? null),

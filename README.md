@@ -93,7 +93,10 @@ docker compose exec backend npx prisma migrate dev --name descricao_da_mudanca
 | `GET` | `/conversations/:id` | Conversa com as mensagens |
 | `PATCH` | `/conversations/:id` | Renomeia e/ou muda a configuração: `{ title?, model?, systemPrompt?, temperature? }` (`null` volta ao padrão) |
 | `DELETE` | `/conversations/:id` | Apaga a conversa e as mensagens |
-| `POST` | `/conversations/:id/messages` | Envia `{ content, think? }` e responde em **SSE** |
+| `POST` | `/conversations/:id/messages` | Envia `{ content, think?, attachmentIds? }` e responde em **SSE** |
+| `POST` | `/attachments` | Upload de imagem: o arquivo é o corpo (`Content-Type: image/*`), até 5 MB |
+| `GET` | `/attachments/:id` | A imagem |
+| `DELETE` | `/attachments/:id` | Remove uma imagem que ainda não foi enviada |
 | `GET` | `/models` | Modelos instalados no Ollama que conversam, com capacidades (raciocínio, imagens, ferramentas) |
 | `GET` | `/settings/defaults` | Modelo e system prompt padrão, limites de tamanho e de temperatura |
 | `GET` | `/events` | **SSE** com as mudanças nas conversas (`conversation.updated` / `conversation.deleted`) |
@@ -108,6 +111,15 @@ Cada conversa pode ter o próprio **modelo**, **system prompt** e **temperatura*
 - **Raciocínio:** o botão só fica disponível se o modelo tiver a capacidade `thinking`.
 - **System prompt:** até 2.000 caracteres. Ele sai do mesmo orçamento de 4096 tokens do histórico.
 - **Mais modelos:** `docker compose exec ollama ollama pull <modelo>`. A lista no painel se atualiza ao abrir.
+
+## Imagens
+
+Anexe pelo clipe, arraste e solte no campo de mensagem ou cole com Ctrl+V (até 3 por mensagem). O botão só aparece se o modelo da conversa tiver visão.
+
+- **No navegador:** a imagem é redimensionada para no máximo 768 px e convertida para JPEG, com `<canvas>` e sem lib. O upload fica pequeno, qualquer formato que o navegador abre funciona e os **metadados EXIF, inclusive localização GPS, são removidos** antes de sair da máquina.
+- **No backend:** o formato é confirmado pelos bytes do arquivo (PNG, JPEG ou WebP), e não pelo cabeçalho da requisição. Largura e altura são lidas do arquivo para estimar os tokens. Os arquivos ficam no volume `uploads`, com nomes gerados (`<uuid>.<ext>`). Uploads nunca enviados são apagados depois de 1 hora, e apagar uma conversa apaga as imagens dela.
+- **Custo no contexto:** medido no `qwen3.5:2b`, cada bloco de 32×32 px custa 1 token. Uma imagem de 768×576 ocupa cerca de 434 tokens da janela de 4096.
+- **Histórico:** só as imagens da mensagem com imagem **mais recente** são reenviadas (para perguntas como "e a cor do carro?"). As mais antigas viram o texto `[o usuário enviou uma imagem aqui]`.
 
 ## Título e resumo automáticos
 
@@ -155,5 +167,5 @@ Os tokens são estimados antes do envio (cerca de 3 caracteres por token, de pro
 - [x] **Fase 1:** chat com streaming, fila do modelo, gestão de contexto
 - [x] **Fase 2:** várias conversas, título automático, resumo das antigas
 - [x] **Fase 3:** modelo, system prompt e temperatura por conversa
-- [ ] **Fase 4:** imagens
+- [x] **Fase 4:** imagens
 - [ ] **Fase 5:** memória com embeddings e RAG

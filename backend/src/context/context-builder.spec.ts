@@ -2,6 +2,7 @@ import {
   composeSystemPrompt,
   ContextBuilder,
   ContextOverflowError,
+  withImagePlaceholder,
   type ContextLimits,
   type HistoryMessage,
 } from './context-builder.js';
@@ -223,6 +224,90 @@ describe('ContextBuilder', () => {
 
     expect(plan.summaryUsed).toBe(false);
     expect(plan.messages).toHaveLength(1);
+  });
+
+  describe('images', () => {
+    const img = (id: string, tokens = 300) => ({ id, tokens });
+
+    it('sends the current images and counts them as mandatory', () => {
+      const plan = new ContextBuilder(limits).build({
+        systemPrompt: '',
+        history: [],
+        userMessage: 'what is this?',
+        userImages: [img('a'), img('b')],
+      });
+
+      expect(plan.messages.at(-1)).toEqual({
+        role: 'user',
+        content: 'what is this?',
+        imageIds: ['a', 'b'],
+      });
+      expect(plan.estimatedPromptTokens).toBeGreaterThanOrEqual(600);
+      expect(plan.imagesSent).toBe(2);
+    });
+
+    it('rejects a message whose images alone overflow the budget', () => {
+      expect(() =>
+        new ContextBuilder(limits).build({
+          systemPrompt: '',
+          history: [],
+          userMessage: '',
+          userImages: [img('a', 1000), img('b', 1000), img('c', 1000)],
+        }),
+      ).toThrow(ContextOverflowError);
+    });
+
+    it('re-sends only the newest history images; older ones become text', () => {
+      const plan = new ContextBuilder(limits).build({
+        systemPrompt: '',
+        history: [
+          { role: 'user', content: 'old photo', images: [img('old')] },
+          { role: 'assistant', content: 'a cat' },
+          { role: 'user', content: 'new photo', images: [img('new')] },
+          { role: 'assistant', content: 'a dog' },
+        ],
+        userMessage: 'what color is it?',
+      });
+
+      expect(plan.messages[0]).toEqual({
+        role: 'user',
+        content: withImagePlaceholder('old photo', 1),
+      });
+      expect(plan.messages[2]).toEqual({
+        role: 'user',
+        content: 'new photo',
+        imageIds: ['new'],
+      });
+      expect(plan.imagesSent).toBe(1);
+    });
+
+    it('uses placeholders when the model has no vision', () => {
+      const plan = new ContextBuilder(limits).build({
+        systemPrompt: '',
+        history: [{ role: 'user', content: '', images: [img('a'), img('b')] }],
+        userMessage: 'hi',
+        visionEnabled: false,
+      });
+
+      expect(plan.messages[0]).toEqual({
+        role: 'user',
+        content: withImagePlaceholder('', 2),
+      });
+      expect(plan.imagesSent).toBe(0);
+    });
+
+    it('falls back to the placeholder when the images do not fit', () => {
+      const plan = new ContextBuilder(limits).build({
+        systemPrompt: '',
+        history: [{ role: 'user', content: 'big', images: [img('a', 2700)] }],
+        userMessage: 'hi',
+      });
+
+      expect(plan.messages[0].imageIds).toBeUndefined();
+      expect(plan.messages[0].content).toContain(
+        '[o usuário enviou uma imagem aqui]',
+      );
+    });
   });
 
   it('rejects a message that cannot fit even alone', () => {

@@ -56,7 +56,26 @@ model Message {
   tokenCount     Int?          @map("token_count")
   status         MessageStatus @default(complete)
   createdAt      DateTime      @default(now()) @map("created_at")
+  attachments    Attachment[]
 
   @@index([conversationId, createdAt])
   @@map("messages")
+}
+
+/// An uploaded image. Uploaded first (messageId null), linked to the user
+/// message when it is sent; never-linked uploads are cleaned up after 1 h.
+model Attachment {
+  id        String   @id @db.Uuid
+  messageId String?  @map("message_id") @db.Uuid
+  message   Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  mimeType  String   @map("mime_type")
+  sizeBytes Int      @map("size_bytes")
+  width     Int
+  height    Int
+  /// File inside UPLOADS_DIR, always `<id>.<ext>`: never a user-provided name.
+  fileName  String   @map("file_name")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([messageId])
+  @@map("attachments")
 }

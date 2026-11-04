@@ -12,7 +12,8 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-RUN chown node:node /app
+# /data/uploads is a named volume: created here so it inherits node ownership.
+RUN chown node:node /app && mkdir -p /data/uploads && chown node:node /data/uploads
 USER node
 
 COPY --chown=node:node package.json package-lock.json ./

@@ -1,24 +1,33 @@
 import {
+  BadRequestException,
   Injectable,
   Logger,
   OnApplicationBootstrap,
   PayloadTooLargeException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { AttachmentsService } from '../attachments/attachments.service.js';
 import { BackgroundJobsService } from '../background/background-jobs.service.js';
 import { EnvironmentVariables } from '../config/env.validation.js';
 import {
   ContextBuilder,
   ContextOverflowError,
   type ContextPlan,
+  type HistoryMessage,
+  type ImageRef,
+  type PlannedMessage,
 } from '../context/context-builder.js';
 import { CONTEXT_MESSAGE_FILTER } from '../conversations/context-messages.js';
 import { toMessageDto } from '../conversations/conversation.dto.js';
 import { ConversationsService } from '../conversations/conversations.service.js';
-import type { Message } from '../generated/prisma/client.js';
+import type { Attachment, Message } from '../generated/prisma/client.js';
 import { LlmError } from '../llm/llm.errors.js';
 import { LlmService } from '../llm/llm.service.js';
-import { LlmPriority, type ChatRequest } from '../llm/llm.types.js';
+import {
+  LlmPriority,
+  type ChatMessage,
+  type ChatRequest,
+} from '../llm/llm.types.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
   DEFAULT_SYSTEM_PROMPT,
@@ -32,7 +41,7 @@ export interface PreparedChat {
   conversationId: string;
   plan: ContextPlan;
   request: ChatRequest;
-  userMessage: Message;
+  userMessage: Message & { attachments: Attachment[] };
   assistantMessage: Message;
 }
 
@@ -46,6 +55,7 @@ export class ChatService implements OnApplicationBootstrap {
     private readonly context: ContextBuilder,
     private readonly llm: LlmService,
     private readonly jobs: BackgroundJobsService,
+    private readonly attachments: AttachmentsService,
     private readonly env: EnvironmentVariables,
   ) {}
 
@@ -61,7 +71,7 @@ export class ChatService implements OnApplicationBootstrap {
 
   /**
    * Everything that can fail fast happens here, before any streaming starts,
-   * so these failures are plain HTTP errors (404, 413, 503).
+   * so these failures are plain HTTP errors (400, 404, 413, 503).
    */
   async prepare(
     conversationId: string,
@@ -76,45 +86,88 @@ export class ChatService implements OnApplicationBootstrap {
       });
     }
 
+    const attachmentIds = dto.attachmentIds ?? [];
+    if (!dto.content.trim() && attachmentIds.length === 0) {
+      throw new BadRequestException({
+        code: 'empty_message',
+        message: 'Send some text or at least one image',
+      });
+    }
+    const uploads = await this.attachments.findUnlinked(attachmentIds);
+
     // Conversation settings (null = default) + this message's thinking
     // toggle. Thinking gets a bigger output reserve, so less history.
     const model = conversation.model ?? this.env.LLM_DEFAULT_MODEL;
+    const capabilities =
+      (await this.llm.findModel(model))?.capabilities ?? null;
+    if (uploads.length > 0 && capabilities && !capabilities.vision) {
+      throw new BadRequestException({
+        code: 'model_without_vision',
+        message: `Model "${model}" cannot see images`,
+      });
+    }
     const settings = resolveChatSettings(
       conversation,
       this.defaults(),
       dto.think ?? false,
-      (await this.llm.findModel(model))?.capabilities ?? null,
-    );
-    // Messages already folded into the summary are not sent again as history.
-    const plan = this.buildPlan(
-      await this.loadHistory(conversationId, conversation.summarizedUntil),
-      dto,
-      settings.systemPrompt,
-      settings.maxOutputTokens,
-      conversation.summary,
+      capabilities,
     );
 
-    // Explicit timestamps keep user -> assistant ordering stable.
+    // Messages already folded into the summary are not sent again as history.
+    const plan = this.buildPlan({
+      history: await this.loadHistory(
+        conversationId,
+        conversation.summarizedUntil,
+      ),
+      dto,
+      systemPrompt: settings.systemPrompt,
+      maxOutputTokens: settings.maxOutputTokens,
+      summary: conversation.summary,
+      userImages: uploads.map((u) => this.imageRef(u)),
+      visionEnabled: capabilities?.vision ?? true,
+    });
+
+    // One transaction: the user message, its images, and the placeholder
+    // answer. Explicit timestamps keep user -> assistant ordering stable.
     const now = Date.now();
-    const [userMessage, assistantMessage] = await this.prisma.$transaction([
-      this.prisma.message.create({
-        data: {
-          conversationId,
-          role: 'user',
-          content: dto.content,
-          createdAt: new Date(now),
-        },
-      }),
-      this.prisma.message.create({
-        data: {
-          conversationId,
-          role: 'assistant',
-          content: '',
-          status: 'streaming',
-          createdAt: new Date(now + 1),
-        },
-      }),
-    ]);
+    const { userMessage, assistantMessage } = await this.prisma.$transaction(
+      async (tx) => {
+        const user = await tx.message.create({
+          data: {
+            conversationId,
+            role: 'user',
+            content: dto.content,
+            createdAt: new Date(now),
+          },
+        });
+        if (attachmentIds.length > 0) {
+          const { count } = await tx.attachment.updateMany({
+            where: { id: { in: attachmentIds }, messageId: null },
+            data: { messageId: user.id },
+          });
+          // Someone else linked them meanwhile: undo everything.
+          if (count !== attachmentIds.length) {
+            throw new BadRequestException({
+              code: 'invalid_attachments',
+              message: 'Some attachments were already sent',
+            });
+          }
+        }
+        const assistant = await tx.message.create({
+          data: {
+            conversationId,
+            role: 'assistant',
+            content: '',
+            status: 'streaming',
+            createdAt: new Date(now + 1),
+          },
+        });
+        return {
+          userMessage: { ...user, attachments: uploads },
+          assistantMessage: assistant,
+        };
+      },
+    );
     await this.conversations.touch(conversationId);
 
     return {
@@ -124,7 +177,7 @@ export class ChatService implements OnApplicationBootstrap {
       assistantMessage,
       request: {
         model: settings.model,
-        messages: plan.messages,
+        messages: await this.withImages(plan.messages),
         think: settings.think,
         maxOutputTokens: settings.maxOutputTokens,
         temperature: settings.temperature,
@@ -160,6 +213,7 @@ export class ChatService implements OnApplicationBootstrap {
         estimatedPromptTokens: plan.estimatedPromptTokens,
         inputBudget: plan.inputBudget,
         summaryUsed: plan.summaryUsed,
+        imagesSent: plan.imagesSent,
       },
     });
 
@@ -234,10 +288,29 @@ export class ChatService implements OnApplicationBootstrap {
   }
 
   /** Newest messages after the summary boundary, oldest first. */
+  /** Turns the plan's image ids into base64, one file at a time. */
+  private async withImages(messages: PlannedMessage[]): Promise<ChatMessage[]> {
+    const result: ChatMessage[] = [];
+    for (const { imageIds, ...message } of messages) {
+      result.push(
+        imageIds?.length
+          ? { ...message, images: await this.attachments.readBase64(imageIds) }
+          : message,
+      );
+    }
+    return result;
+  }
+
+  private imageRef(
+    attachment: Pick<Attachment, 'id' | 'width' | 'height'>,
+  ): ImageRef {
+    return { id: attachment.id, tokens: this.attachments.tokensOf(attachment) };
+  }
+
   private async loadHistory(
     conversationId: string,
     summarizedUntil: Date | null,
-  ) {
+  ): Promise<HistoryMessage[]> {
     const recent = await this.prisma.message.findMany({
       where: {
         conversationId,
@@ -247,29 +320,36 @@ export class ChatService implements OnApplicationBootstrap {
       orderBy: { createdAt: 'desc' },
       // The builder caps history anyway; no need to read more rows than that.
       take: this.env.CONTEXT_MAX_HISTORY_MESSAGES,
-      select: { role: true, content: true },
+      select: {
+        role: true,
+        content: true,
+        attachments: {
+          orderBy: { createdAt: 'asc' },
+          select: { id: true, width: true, height: true },
+        },
+      },
     });
     return recent.reverse().map((m) => ({
       role: m.role as 'user' | 'assistant',
       content: m.content,
+      images: m.attachments.map((a) => this.imageRef(a)),
     }));
   }
 
-  private buildPlan(
-    history: { role: 'user' | 'assistant'; content: string }[],
-    dto: SendMessageDto,
-    systemPrompt: string,
-    maxOutputTokens: number,
-    summary: string | null,
-  ): ContextPlan {
+  private buildPlan({
+    dto,
+    ...input
+  }: {
+    history: HistoryMessage[];
+    dto: SendMessageDto;
+    systemPrompt: string;
+    maxOutputTokens: number;
+    summary: string | null;
+    userImages: ImageRef[];
+    visionEnabled: boolean;
+  }): ContextPlan {
     try {
-      return this.context.build({
-        systemPrompt,
-        history,
-        userMessage: dto.content,
-        maxOutputTokens,
-        summary,
-      });
+      return this.context.build({ ...input, userMessage: dto.content });
     } catch (error) {
       if (error instanceof ContextOverflowError) {
         throw new PayloadTooLargeException({

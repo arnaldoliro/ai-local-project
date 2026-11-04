@@ -6,6 +6,7 @@ import {
   createConversation,
   fetchConversation,
   postMessage,
+  type Attachment,
   type Conversation,
   type ConversationSettings,
   type Message,
@@ -96,7 +97,12 @@ export function useChat(initialConversationId: string | null, onCreated: (conver
    * Resolves `false` when nothing was saved (the caller restores the draft).
    */
   const send = useCallback(
-    async (content: string, think: boolean, newChatSettings?: ConversationSettings): Promise<boolean> => {
+    async (
+      content: string,
+      think: boolean,
+      newChatSettings?: ConversationSettings,
+      attachments: Attachment[] = [],
+    ): Promise<boolean> => {
       if (abortRef.current) return false;
 
       const controller = new AbortController();
@@ -112,8 +118,16 @@ export function useChat(initialConversationId: string | null, onCreated: (conver
       setPhase({ kind: "sending" });
       setMessages((list) => [
         ...list,
-        { id: tempUserId, role: "user", content, thinking: null, status: "complete", createdAt },
-        { id: tempAssistantId, role: "assistant", content: "", thinking: null, status: "streaming", createdAt },
+        { id: tempUserId, role: "user", content, thinking: null, status: "complete", createdAt, attachments },
+        {
+          id: tempAssistantId,
+          role: "assistant",
+          content: "",
+          thinking: null,
+          status: "streaming",
+          createdAt,
+          attachments: [],
+        },
       ]);
 
       const removeOptimistic = () =>
@@ -128,7 +142,11 @@ export function useChat(initialConversationId: string | null, onCreated: (conver
           onCreated(conversation);
         }
 
-        const response = await postMessage(id, { content, think }, controller.signal);
+        const response = await postMessage(
+          id,
+          { content, think, attachmentIds: attachments.map((a) => a.id) },
+          controller.signal,
+        );
 
         for await (const { event, data } of readSse(response.body!)) {
           const payload = JSON.parse(data);

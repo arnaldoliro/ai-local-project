@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../llm/llm.types.js';
+import type { ChatRole } from '../llm/llm.types.js';
 import {
   estimateMessageTokens,
   PROMPT_OVERHEAD_TOKENS,
@@ -15,9 +15,23 @@ export interface ContextLimits {
   safetyMarginRatio: number;
 }
 
+/** An attached image, by reference: the builder only needs its cost. */
+export interface ImageRef {
+  id: string;
+  tokens: number;
+}
+
 export interface HistoryMessage {
   role: 'user' | 'assistant';
   content: string;
+  images?: ImageRef[];
+}
+
+/** A message of the plan; images are ids, loaded from disk by the caller. */
+export interface PlannedMessage {
+  role: ChatRole;
+  content: string;
+  imageIds?: string[];
 }
 
 export interface BuildContextInput {
@@ -34,17 +48,38 @@ export interface BuildContextInput {
   maxOutputTokens?: number;
   /** Summary of the messages older than `history` (Phase 2). */
   summary?: string | null;
+  /** Images attached to the message being sent (mandatory, like its text). */
+  userImages?: ImageRef[];
+  /** False when the model can't see images: history images become text. */
+  visionEnabled?: boolean;
 }
 
 export interface ContextPlan {
   /** Exactly what will be sent to the model. */
-  messages: ChatMessage[];
+  messages: PlannedMessage[];
   estimatedPromptTokens: number;
   inputBudget: number;
   includedHistory: number;
   droppedHistory: number;
   summaryUsed: boolean;
+  /** Images sent in this request (current message + history). */
+  imagesSent: number;
 }
+
+/**
+ * What replaces an image in history when it isn't re-sent: the model still
+ * knows something was shown there, instead of seeing a reply out of context.
+ */
+export function withImagePlaceholder(content: string, count: number): string {
+  const note =
+    count === 1
+      ? '[o usuário enviou uma imagem aqui]'
+      : `[o usuário enviou ${count} imagens aqui]`;
+  return content ? `${content}\n\n${note}` : note;
+}
+
+const imagesCost = (images: ImageRef[] = []) =>
+  images.reduce((sum, image) => sum + image.tokens, 0);
 
 /**
  * The summary rides inside the system message instead of being a second
@@ -87,6 +122,10 @@ export class ContextOverflowError extends Error {
  *
  * History is kept contiguous: once a message doesn't fit, everything older
  * is dropped too, so the model never sees a conversation with holes.
+ *
+ * Images (Phase 4) cost hundreds of tokens each, so only the most recent
+ * history message with images re-sends them (that's what follow-up
+ * questions refer to); older ones keep a text placeholder.
  * Phase 5 adds RAG snippets.
  *
  * Pure class (no I/O, no Nest): trivially unit-testable.
@@ -119,10 +158,14 @@ export class ContextBuilder {
     userMessage,
     maxOutputTokens = this.limits.maxOutputTokens,
     summary,
+    userImages = [],
+    visionEnabled = true,
   }: BuildContextInput): ContextPlan {
     const budget = this.inputBudgetFor(maxOutputTokens);
     const userCost =
-      estimateMessageTokens(userMessage) + PROMPT_OVERHEAD_TOKENS;
+      estimateMessageTokens(userMessage) +
+      imagesCost(userImages) +
+      PROMPT_OVERHEAD_TOKENS;
     const systemCost = (text: string) =>
       text ? estimateMessageTokens(text) : 0;
 
@@ -144,18 +187,48 @@ export class ContextBuilder {
     const candidates = cap === 0 ? [] : history.slice(-cap);
 
     let used = mandatory;
-    const selected: HistoryMessage[] = [];
+    let imagesSent = userImages.length;
+    let historyImagesDecided = false;
+    const selected: PlannedMessage[] = [];
+
     for (let i = candidates.length - 1; i >= 0; i--) {
-      const cost = estimateMessageTokens(candidates[i].content);
+      const { role, content, images = [] } = candidates[i];
+      let planned: PlannedMessage | null = null;
+      let cost = 0;
+
+      // The newest message with images gets them back, if they fit.
+      if (images.length > 0 && !historyImagesDecided) {
+        historyImagesDecided = true;
+        const withImages = estimateMessageTokens(content) + imagesCost(images);
+        if (visionEnabled && used + withImages <= budget) {
+          planned = { role, content, imageIds: images.map((img) => img.id) };
+          cost = withImages;
+          imagesSent += images.length;
+        }
+      }
+      if (!planned) {
+        const text = images.length
+          ? withImagePlaceholder(content, images.length)
+          : content;
+        planned = { role, content: text };
+        cost = estimateMessageTokens(text);
+      }
+
       if (used + cost > budget) break;
       used += cost;
-      selected.unshift(candidates[i]);
+      selected.unshift(planned);
     }
 
-    const messages: ChatMessage[] = [
+    const messages: PlannedMessage[] = [
       ...(system ? [{ role: 'system' as const, content: system }] : []),
       ...selected,
-      { role: 'user', content: userMessage },
+      {
+        role: 'user',
+        content: userMessage,
+        ...(userImages.length > 0 && {
+          imageIds: userImages.map((img) => img.id),
+        }),
+      },
     ];
 
     return {
@@ -165,6 +238,7 @@ export class ContextBuilder {
       includedHistory: selected.length,
       droppedHistory: history.length - selected.length,
       summaryUsed,
+      imagesSent,
     };
   }
 }

@@ -9,6 +9,7 @@ import { useSettingsData } from "@/components/settings/settings-data";
 import { SettingsPanel } from "@/components/settings/settings-panel";
 import { useShell } from "@/components/shell/shell";
 import { StatusIndicator } from "@/components/status-indicator";
+import { useAttachments } from "@/hooks/use-attachments";
 import { useChat } from "@/hooks/use-chat";
 import type { Conversation, ConversationSettings } from "@/lib/api";
 import { Composer } from "./composer";
@@ -33,6 +34,7 @@ export function ChatApp({ conversationId, onCreated }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   // A new chat can be configured before it exists; sent on creation.
   const [pendingSettings, setPendingSettings] = useState(NO_SETTINGS);
+  const attachments = useAttachments();
 
   const conversation = conversations.find((c) => c.id === chat.conversationId);
   const title = conversation?.title ?? null;
@@ -41,7 +43,9 @@ export function ChatApp({ conversationId, onCreated }: Props) {
     : pendingSettings;
   const model = settings.model ?? defaults?.model ?? null;
   // Unknown (list not loaded yet) counts as supported; the backend decides.
-  const thinkSupported = model ? (findModel(model)?.capabilities.thinking ?? true) : true;
+  const modelInfo = model ? findModel(model) : undefined;
+  const thinkSupported = modelInfo?.capabilities.thinking ?? true;
+  const visionSupported = modelInfo?.capabilities.vision ?? true;
 
   const saveSettings = async (next: ConversationSettings) => {
     if (chat.conversationId) await update(chat.conversationId, next);
@@ -50,13 +54,15 @@ export function ChatApp({ conversationId, onCreated }: Props) {
 
   const submit = async () => {
     const content = draft.trim();
-    if (!content || chat.isStreaming) return;
+    const images = attachments.ready;
+    if ((!content && images.length === 0) || attachments.busy || chat.isStreaming) return;
     const thinkForThis = think && thinkSupported;
     setDraft("");
     setThink(false);
 
-    const saved = await chat.send(content, thinkForThis, pendingSettings);
-    if (!saved) {
+    const saved = await chat.send(content, thinkForThis, pendingSettings, images);
+    if (saved) attachments.clear();
+    else {
       // Nothing reached the server: give the text back so it isn't lost.
       setDraft(content);
       setThink(thinkForThis);
@@ -140,8 +146,14 @@ export function ChatApp({ conversationId, onCreated }: Props) {
           onThinkChange={setThink}
           thinkSupported={thinkSupported}
           streaming={chat.isStreaming}
-          error={chat.sendError}
+          error={chat.sendError ?? attachments.limitError}
           onDismissError={chat.dismissError}
+          attachments={attachments.items}
+          attachmentsBusy={attachments.busy}
+          readyAttachments={attachments.ready.length}
+          onAddFiles={attachments.add}
+          onRemoveAttachment={attachments.remove}
+          visionSupported={visionSupported}
         />
       )}
 

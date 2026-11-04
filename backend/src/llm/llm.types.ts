@@ -3,6 +3,8 @@ export type ChatRole = 'system' | 'user' | 'assistant';
 export interface ChatMessage {
   role: ChatRole;
   content: string;
+  /** Base64 images (no data: prefix), as Ollama's /api/chat expects. */
+  images?: string[];
 }
 
 export interface ChatRequest {

@@ -28,6 +28,21 @@ export function estimateMessageTokens(content: string): number {
   return estimateTextTokens(content) + MESSAGE_OVERHEAD_TOKENS;
 }
 
+/**
+ * Image cost for the Qwen vision encoder: one token per 32x32 px block, plus
+ * the image start/end markers. Measured on qwen3.5:2b (2026-11-04): a
+ * 640x480 image added 301 prompt tokens = 20 x 15 blocks + 1.
+ */
+export const IMAGE_BLOCK_PX = 32;
+export const IMAGE_OVERHEAD_TOKENS = 2;
+
+export function estimateImageTokens(width: number, height: number): number {
+  return (
+    Math.ceil(width / IMAGE_BLOCK_PX) * Math.ceil(height / IMAGE_BLOCK_PX) +
+    IMAGE_OVERHEAD_TOKENS
+  );
+}
+
 /** Cuts text to roughly `tokens` tokens, marking the cut with an ellipsis. */
 export function truncateToTokens(text: string, tokens: number): string {
   const maxChars = Math.max(0, tokens) * CHARS_PER_TOKEN;

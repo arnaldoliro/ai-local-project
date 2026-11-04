@@ -17,6 +17,16 @@ export type HealthResponse = {
 
 export type MessageStatus = "streaming" | "complete" | "error" | "aborted";
 
+export type Attachment = {
+  id: string;
+  mimeType: string;
+  width: number;
+  height: number;
+  sizeBytes: number;
+  /** Estimated prompt tokens the image takes. */
+  tokens: number;
+};
+
 export type Message = {
   id: string;
   role: "user" | "assistant" | "system";
@@ -24,7 +34,23 @@ export type Message = {
   thinking: string | null;
   status: MessageStatus;
   createdAt: string;
+  attachments: Attachment[];
 };
+
+export const attachmentUrl = (id: string) => `${API_URL}/attachments/${id}`;
+
+/** The image goes as the raw body; the server validates the bytes. */
+export const uploadAttachment = (image: Blob, signal?: AbortSignal) =>
+  request<Attachment>("/attachments", {
+    method: "POST",
+    headers: { "Content-Type": image.type || "image/jpeg" },
+    body: image,
+    signal,
+  });
+
+export async function deleteAttachment(id: string): Promise<void> {
+  await fetch(`${API_URL}/attachments/${id}`, { method: "DELETE" }).catch(() => {});
+}
 
 /** null = use the default (see fetchSettingsDefaults). */
 export type ConversationSettings = {
@@ -132,7 +158,7 @@ export const EVENTS_URL = `${API_URL}/events`;
 /** Opens the SSE stream. The caller reads `response.body` with `readSse`. */
 export async function postMessage(
   conversationId: string,
-  body: { content: string; think: boolean },
+  body: { content: string; think: boolean; attachmentIds?: string[] },
   signal: AbortSignal,
 ): Promise<Response> {
   const response = await fetch(`${API_URL}/conversations/${conversationId}/messages`, {

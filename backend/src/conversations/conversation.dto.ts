@@ -1,4 +1,13 @@
-import type { Conversation, Message } from '../generated/prisma/client.js';
+import {
+  toAttachmentDto,
+  type AttachmentDto,
+} from '../attachments/attachment.dto.js';
+import { estimateImageTokens } from '../context/token-estimator.js';
+import type {
+  Attachment,
+  Conversation,
+  Message,
+} from '../generated/prisma/client.js';
 
 /** API shape of a message. Internal fields (token counts) stay server-side. */
 export interface MessageDto {
@@ -8,6 +17,7 @@ export interface MessageDto {
   thinking: string | null;
   status: Message['status'];
   createdAt: string;
+  attachments: AttachmentDto[];
 }
 
 export interface ConversationDto {
@@ -25,13 +35,18 @@ export interface ConversationWithMessagesDto extends ConversationDto {
   messages: MessageDto[];
 }
 
-export const toMessageDto = (m: Message): MessageDto => ({
+export const toMessageDto = (
+  m: Message & { attachments?: Attachment[] },
+): MessageDto => ({
   id: m.id,
   role: m.role,
   content: m.content,
   thinking: m.thinking,
   status: m.status,
   createdAt: m.createdAt.toISOString(),
+  attachments: (m.attachments ?? []).map((a) =>
+    toAttachmentDto(a, estimateImageTokens(a.width, a.height)),
+  ),
 });
 
 export const toConversationDto = (c: Conversation): ConversationDto => ({

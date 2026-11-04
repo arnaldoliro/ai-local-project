@@ -9,6 +9,12 @@ const MESSAGES: Record<string, string> = {
   aborted: "Resposta interrompida.",
   context_overflow: "A mensagem é grande demais para a janela de contexto do modelo.",
   network: "Sem conexão com o backend.",
+  empty_message: "Escreva algo ou anexe uma imagem.",
+  model_without_vision: "O modelo desta conversa não enxerga imagens. Troque de modelo nas configurações.",
+  invalid_attachments: "Alguma imagem não está mais disponível. Anexe de novo.",
+  unsupported_image: "Formato de imagem não suportado.",
+  image_too_large: "Imagem grande demais.",
+  file_too_large: "Arquivo maior que 5 MB.",
 };
 
 export function errorMessage(code: string | undefined): string {

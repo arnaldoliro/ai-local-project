@@ -96,6 +96,10 @@ export class EnvironmentVariables {
   @Max(50)
   LLM_QUEUE_MAX_SIZE: number;
 
+  /** Where uploaded images are stored (a Docker volume). */
+  @IsString()
+  UPLOADS_DIR: string;
+
   /** Upper bound of history messages considered, before the token budget. */
   @Transform(({ value }) => Number(value))
   @IsInt()
